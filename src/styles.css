@@ -1,0 +1,40 @@
+/* In styles.css */
+
+/* Grundlegendes Styling für den gesamten Körper */
+body {
+  margin: 0;
+  font-family: "Courier New", Courier, monospace; /* Eine Schriftart, die an alte Displays erinnert */
+  background-color: #333; /* Dunkler Hintergrund für den "Raum" */
+  color: #c0c0c0; /* Heller, gedämpfter Text */
+  overflow-x: hidden; /* Verhindert horizontalen Scrollbalken */
+}
+
+.App {
+  width: 100vw;
+  padding: 20px; /* Mehr Padding für den "Rahmen" des Geräts */
+  box-sizing: border-box;
+  margin: 0;
+  display: flex;
+  justify-content: center;
+  align-items: center; /* Zentriert den Meter vertikal */
+  min-height: 100vh; /* Macht die App bildschirmfüllend */
+
+  /* NEU: Hintergrund für das "Fernmeldesystem-Panel" */
+  background-color: #2e3d3e; /* Dunkles Olivgrün / Grau */
+  background-image: repeating-linear-gradient(
+      0deg,
+      #3a4a4b 0px,
+      #3a4a4b 1px,
+      transparent 1px,
+      transparent 100px
+    ),
+    /* Dezente Linien */
+      url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxMDAlIiBoZWlnaHQ9IjEwMCUiPjxwYXR0ZXJuIGlkPSJncmlkIiB3aWR0aD0iMjAiIGhlaWdodD0iMjAiIHBhdHRlcm5Vbml0cz0idXNlclNwYWNlT25Vc2UiPjxyZWN0IHdpZHRoPSIxIiBoZWlnaHQ9IjEiIHg9IjAiIHk9IjAiIGZpbGw9IiM0NDQ0NDQiLz48L3BhdHRlcm4+PHJlY3Qgd2lkdGg9IjEwMCUiIGhlaWdodD0iMTAwJSIgZmlsbD0idXJsKCNncmlkKSIvPjwvc3ZnPg=="); /* Dezentes Rauschen/Gitter */
+  background-size: 100%, 20px 20px;
+  background-blend-mode: overlay; /* Mischt die Hintergrundbilder */
+
+  border: 5px solid #1a2024; /* Dicker, dunkler Rahmen */
+  border-radius: 10px; /* Abgerundete Ecken */
+  box-shadow: inset 0 0 10px rgba(0, 0, 0, 0.8),
+    /* Innerer Schatten für Tiefe */ 0 5px 15px rgba(0, 0, 0, 0.5); /* Äußerer Schatten */
+}
