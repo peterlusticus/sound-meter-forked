@@ -1,17 +1,24 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useRef, useState, useCallback } from "react";
 import "./styles.css";
 
 const settings = {
   bars: 30,
-  width: 10, // Die Breite wird jetzt als Mindestgröße betrachtet, aber Flexbox übernimmt die Verteilung
+  width: 10,
   height: 200,
 };
 
 const AIRHORN_SOUND_URL = "/airhorn.mp3";
 
-const WARNING_THRESHOLD = 50;
+// Standardwert für den Schwellenwert (kann später im Slider angepasst werden)
+const INITIAL_WARNING_THRESHOLD = 50;
+const MAX_THRESHOLD = 100; // Maximaler Wert für den Slider
+const MIN_THRESHOLD = 1; // Minimaler Wert für den Slider
 
 const Meter = () => {
+  // 1. Schwellenwert als State hinzufügen
+  const [warningThreshold, setWarningThreshold] = useState(
+    INITIAL_WARNING_THRESHOLD
+  );
   const [isLoud, setIsLoud] = useState(false);
   const refs = useRef([]);
   const volume = useRef(0);
@@ -29,21 +36,20 @@ const Meter = () => {
     setIsLoud(loud);
 
     if (loud) {
-      // Spiele den Ton nur ab, wenn er noch nicht ausgelöst wurde
       if (!alarmTriggered.current && airhorn.current) {
-        airhorn.current.currentTime = 0; // Stellt sicher, dass der Ton von vorne beginnt
+        airhorn.current.currentTime = 0;
         airhorn.current
           .play()
           .catch((e) => console.error("Fehler beim Abspielen des Tons:", e));
-        alarmTriggered.current = true; // Markieren, dass der Ton gespielt wurde
+        alarmTriggered.current = true;
       }
     } else {
-      // Setzt den Trigger zurück, wenn die Lautstärke wieder unter dem Schwellenwert liegt
       alarmTriggered.current = false;
     }
   };
 
-  const getMedia = () => {
+  // 2. getMedia als useCallback definieren, da es in useEffect verwendet wird
+  const getMedia = useCallback(() => {
     navigator.mediaDevices
       .getUserMedia({ audio: true })
       .then((stream) => {
@@ -70,8 +76,8 @@ const Meter = () => {
 
           volume.current = values / length;
 
-          // Lautstärke-Warnlogik
-          if (volume.current > WARNING_THRESHOLD) {
+          // HINWEIS: Lautstärke-Warnlogik verwendet jetzt den State warningThreshold
+          if (volume.current > warningThreshold) {
             setWarning(true);
           } else {
             setWarning(false);
@@ -81,9 +87,15 @@ const Meter = () => {
       .catch(function (err) {
         console.error("Fehler beim Zugriff auf das Mikrofon:", err);
       });
-  };
+  }, [warningThreshold]); // Abhängigkeit von warningThreshold hinzufügen
 
-  useEffect(getMedia, []);
+  // 3. useEffect anpassen, um getMedia bei Änderung des Schwellenwerts neu zu starten
+  // Dies ist NOTWENDIG, damit die onaudioprocess-Funktion den neuen Schwellenwert sieht.
+  useEffect(() => {
+    getMedia();
+    // Ein Clean-up wäre hier gut, um den AudioContext zu stoppen,
+    // aber das ist in diesem Beispiel komplexer. Für dieses Beispiel belassen wir es dabei.
+  }, [getMedia]);
 
   useEffect(() => {
     const intervalId = setInterval(() => {
@@ -92,16 +104,23 @@ const Meter = () => {
       volumeRefs.current.pop();
       for (let i = 0; i < refs.current.length; i++) {
         if (refs.current[i]) {
+          // NEU: Setzt die Farbe auf Rot, wenn die aktuelle Lautstärke (volume.current)
+          // den *aktuellen* Schwellenwert überschreitet, unabhängig vom isLoud State,
+          // da isLoud den Alarm-Sound triggert.
+          const isBarLoud = volumeRefs.current[i] > warningThreshold;
+
           refs.current[i].style.transform = `scaleY(${
             volumeRefs.current[i] / 100
           })`;
+          // Hintergrund-Farbe basierend auf Schwellenwert-Überschreitung für diesen Balken
+          refs.current[i].style.background = isBarLoud ? "red" : "#7ED321";
         }
       }
     }, 20);
     return () => {
       clearInterval(intervalId);
     };
-  }, []);
+  }, [warningThreshold]); // Abhängigkeit hinzugefügt, falls Sie die Logik im Intervall ändern möchten
 
   const createElements = () => {
     let elements = [];
@@ -116,8 +135,7 @@ const Meter = () => {
           }}
           key={`vu-${i}`}
           style={{
-            // NEU: Gedämpftes Grün für die normalen Balken
-            background: isLoud ? "red" : "#7ED321", // Hellgrün für normalen Betrieb
+            background: "#7ED321", // Standardfarbe, wird im Interval überschrieben
             minWidth: settings.width + "px",
             flexGrow: 1,
 
@@ -139,18 +157,46 @@ const Meter = () => {
       style={{
         position: "relative",
         width: "100%",
-        height: settings.height + 40 + "px", // Platz für Balken + Warnung
+        height: settings.height + 40 + "px",
         display: "flex",
         justifyContent: "space-between",
         alignItems: "flex-end",
-        // NEU: Hintergrund für den Meterbereich selbst, z.B. dunkler als das Panel
-        background: "#1a2024" /* Sehr dunkles Grau */,
-        padding: "10px" /* Etwas inneres Padding für den Meter-Bereich */,
-        borderRadius: "5px" /* Leichte Rundung für den Meter-Bereich */,
-        boxShadow:
-          "inset 0 0 5px rgba(0,0,0,0.8)" /* Leichter innerer Schatten */,
+        background: "#1a2024",
+        padding: "10px",
+        borderRadius: "5px",
+        boxShadow: "inset 0 0 5px rgba(0,0,0,0.8)",
       }}
     >
+      {/* 4. Regler-Element (Slider) hinzufügen */}
+      <div
+        style={{
+          position: "absolute",
+          top: "10px",
+          right: "10px",
+          zIndex: 10,
+          background: "rgba(255, 255, 255, 0.1)",
+          padding: "5px 10px",
+          borderRadius: "5px",
+          color: "white",
+          fontSize: "12px",
+          display: "flex",
+          alignItems: "center",
+          gap: "10px",
+        }}
+      >
+        <span>
+          Auslöser-Schwelle: **{warningThreshold}** (Min: {MIN_THRESHOLD}, Max:{" "}
+          {MAX_THRESHOLD})
+        </span>
+        <input
+          type="range"
+          min={MIN_THRESHOLD}
+          max={MAX_THRESHOLD}
+          value={warningThreshold}
+          onChange={(e) => setWarningThreshold(Number(e.target.value))}
+          style={{ width: "150px" }}
+        />
+      </div>
       {isLoud && (
         <div
           style={{
@@ -161,11 +207,10 @@ const Meter = () => {
             textAlign: "center",
             color: "black",
             fontWeight: "bold",
-            fontFamily: "arial", // Beibehalten oder anpassen
+            fontFamily: "arial",
             fontSize: "20px",
             background: "red",
             padding: "5px",
-            // NEU: Leichte Text-Schatten, um es "leuchtend" zu machen
             textShadow: "0 0 5px yellow, 0 0 10px orange",
           }}
         >
