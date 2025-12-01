@@ -9,13 +9,12 @@ const settings = {
 
 const AIRHORN_SOUND_URL = "/airhorn.mp3";
 
-// Standardwert für den Schwellenwert (kann später im Slider angepasst werden)
-const INITIAL_WARNING_THRESHOLD = 50;
-const MAX_THRESHOLD = 100; // Maximaler Wert für den Slider
-const MIN_THRESHOLD = 1; // Minimaler Wert für den Slider
+// Neuer Standardwert für den Schwellenwert (z.B. 100, nun die Mitte des Bereichs 0-200)
+const INITIAL_WARNING_THRESHOLD = 50; 
+const MAX_THRESHOLD = 200; // Angepasster Maximalwert
+const MIN_THRESHOLD = 1; // Minimaler Wert bleibt 1
 
 const Meter = () => {
-  // 1. Schwellenwert als State hinzufügen
   const [warningThreshold, setWarningThreshold] = useState(
     INITIAL_WARNING_THRESHOLD
   );
@@ -48,7 +47,6 @@ const Meter = () => {
     }
   };
 
-  // 2. getMedia als useCallback definieren, da es in useEffect verwendet wird
   const getMedia = useCallback(() => {
     navigator.mediaDevices
       .getUserMedia({ audio: true })
@@ -59,6 +57,9 @@ const Meter = () => {
         const javascriptNode = audioContext.createScriptProcessor(2048, 1, 1);
         analyser.smoothingTimeConstant = 0.4;
         analyser.fftSize = 1024;
+        // Wichtig: Die getByteFrequencyData liefert Werte von 0-255.
+        // Die Berechnung des Durchschnitts (volume.current) kann theoretisch bis zu 255 gehen.
+        // Daher ist MAX_THRESHOLD = 200 (oder 255) sinnvoll.
 
         microphone.connect(analyser);
         analyser.connect(javascriptNode);
@@ -76,7 +77,7 @@ const Meter = () => {
 
           volume.current = values / length;
 
-          // HINWEIS: Lautstärke-Warnlogik verwendet jetzt den State warningThreshold
+          // Lautstärke-Warnlogik verwendet jetzt den State warningThreshold
           if (volume.current > warningThreshold) {
             setWarning(true);
           } else {
@@ -87,14 +88,12 @@ const Meter = () => {
       .catch(function (err) {
         console.error("Fehler beim Zugriff auf das Mikrofon:", err);
       });
-  }, [warningThreshold]); // Abhängigkeit von warningThreshold hinzufügen
+  }, [warningThreshold]);
 
-  // 3. useEffect anpassen, um getMedia bei Änderung des Schwellenwerts neu zu starten
-  // Dies ist NOTWENDIG, damit die onaudioprocess-Funktion den neuen Schwellenwert sieht.
+  // Startet das Audio-Processing neu, wenn sich der Schwellenwert ändert,
+  // damit die onaudioprocess-Funktion den neuen Wert verwenden kann.
   useEffect(() => {
     getMedia();
-    // Ein Clean-up wäre hier gut, um den AudioContext zu stoppen,
-    // aber das ist in diesem Beispiel komplexer. Für dieses Beispiel belassen wir es dabei.
   }, [getMedia]);
 
   useEffect(() => {
@@ -104,15 +103,18 @@ const Meter = () => {
       volumeRefs.current.pop();
       for (let i = 0; i < refs.current.length; i++) {
         if (refs.current[i]) {
-          // NEU: Setzt die Farbe auf Rot, wenn die aktuelle Lautstärke (volume.current)
-          // den *aktuellen* Schwellenwert überschreitet, unabhängig vom isLoud State,
-          // da isLoud den Alarm-Sound triggert.
           const isBarLoud = volumeRefs.current[i] > warningThreshold;
 
+          // HINWEIS: Die Skalierung (volumeRefs.current[i] / 100) funktioniert
+          // besser mit einer Skalierung auf 200, d.h. (volumeRefs.current[i] / 200).
+          // Da der Balken nur bis zur Größe des Containers wachsen soll,
+          // behalten wir 100 bei, oder verwenden `volumeRefs.current[i] / MAX_THRESHOLD`.
+          // Für diesen Fall verwenden wir MAX_THRESHOLD als Skalierungsbasis
+          // um die Balkenhöhe relativ zum max. Wert zu halten.
           refs.current[i].style.transform = `scaleY(${
-            volumeRefs.current[i] / 100
+            volumeRefs.current[i] / MAX_THRESHOLD
           })`;
-          // Hintergrund-Farbe basierend auf Schwellenwert-Überschreitung für diesen Balken
+          
           refs.current[i].style.background = isBarLoud ? "red" : "#7ED321";
         }
       }
@@ -120,7 +122,7 @@ const Meter = () => {
     return () => {
       clearInterval(intervalId);
     };
-  }, [warningThreshold]); // Abhängigkeit hinzugefügt, falls Sie die Logik im Intervall ändern möchten
+  }, [warningThreshold]);
 
   const createElements = () => {
     let elements = [];
@@ -135,7 +137,7 @@ const Meter = () => {
           }}
           key={`vu-${i}`}
           style={{
-            background: "#7ED321", // Standardfarbe, wird im Interval überschrieben
+            background: "#7ED321",
             minWidth: settings.width + "px",
             flexGrow: 1,
 
@@ -167,7 +169,7 @@ const Meter = () => {
         boxShadow: "inset 0 0 5px rgba(0,0,0,0.8)",
       }}
     >
-      {/* 4. Regler-Element (Slider) hinzufügen */}
+      {/* Regler-Element (Slider) mit aktualisierten Werten */}
       <div
         style={{
           position: "absolute",
@@ -191,7 +193,8 @@ const Meter = () => {
         <input
           type="range"
           min={MIN_THRESHOLD}
-          max={MAX_THRESHOLD}
+          // Max auf 200 gesetzt
+          max={MAX_THRESHOLD} 
           value={warningThreshold}
           onChange={(e) => setWarningThreshold(Number(e.target.value))}
           style={{ width: "150px" }}
