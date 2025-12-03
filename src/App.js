@@ -8,35 +8,27 @@ const settings = {
 };
 
 const AIRHORN_SOUND_URL = "/airhorn.mp3";
-const ALARM_DELAY_MS = 200; // 🚨 NEUE KONSTANTE: Alarm erst nach 200ms Überschreitung
+const ALARM_DELAY_MS = 200; // Alarm erst nach 200ms Überschreitung
 
-// Konstanten für die Lautstärkeskala
+// ... (Rest der Konstanten und Hilfsfunktionen bleibt unverändert)
+
 const MAX_ANALYZER_VALUE = 255;
 const MIN_THRESHOLD = 1;
-
-// Konstanten für die dB-Skala
 const MAX_DB = 90;
 const INITIAL_WARNING_DB = 75;
 
-// Hilfsfunktion: Konvertiert Volumen (0-255) zu dB (0-MAX_DB)
 const volumeToDb = (volume) => {
   const normalizedVolume = volume / MAX_ANALYZER_VALUE;
-
   if (normalizedVolume < 0.001) {
     return 30;
   }
-
   let db = 20 * Math.log10(normalizedVolume) + MAX_DB;
-
   return Math.min(MAX_DB, Math.max(30, db));
 };
 
-// Hilfsfunktion: Konvertiert dB (0-MAX_DB) zu Volumen (0-255)
 const dbToVolume = (db) => {
   if (db <= 30) return MIN_THRESHOLD;
-
   let volume = MAX_ANALYZER_VALUE * Math.pow(10, (db - MAX_DB) / 20);
-
   return Math.min(MAX_ANALYZER_VALUE, Math.max(MIN_THRESHOLD, volume));
 };
 
@@ -56,35 +48,43 @@ const Meter = () => {
   const volumeRefs = useRef(new Array(settings.bars).fill(0));
 
   const currentSmoothedDb = useRef(0.0);
-
-  // 🚨 NEU: Speichert, wie lange der Lautstärke-Grenzwert bereits überschritten ist.
   const loudnessDuration = useRef(0);
-  const lastTimeCheck = useRef(performance.now()); // Für genaue Zeitmessung
+  const lastTimeCheck = useRef(performance.now());
 
   const airhorn = useRef(null);
   const alarmTriggered = useRef(false);
 
   useEffect(() => {
     airhorn.current = new Audio(AIRHORN_SOUND_URL);
+    // 💡 NEU: Stellt sicher, dass der Ton immer wieder abgespielt werden kann
+    airhorn.current.loop = false;
   }, []);
 
-  // setWarning wird jetzt nur für die Steuerung des Tons und des UI-States verwendet
+  // 🚨 KORRIGIERTE setWarning Funktion für Ton- und UI-Steuerung
   const setWarning = (loud) => {
-    // Aktualisiert den State für die UI (rot/Alarm-Text)
+    // 1. UI-Update: State für die Sichtbarkeit der Warnmeldung
     if (loud !== isLoud) {
       setIsLoud(loud);
     }
 
-    // Steuert den Ton
+    // 2. Ton-Steuerung
     if (loud) {
       if (!alarmTriggered.current && airhorn.current) {
         airhorn.current.currentTime = 0;
         airhorn.current
           .play()
           .catch((e) => console.error("Fehler beim Abspielen des Tons:", e));
+
+        // 🚨 Wichtig: Hier setzen wir den Trigger, solange der Ton läuft
         alarmTriggered.current = true;
       }
     } else {
+      // Wenn nicht mehr laut: Ton stoppen und Trigger zurücksetzen
+      if (airhorn.current) {
+        airhorn.current.pause();
+        airhorn.current.currentTime = 0;
+      }
+      // 🚨 Wichtig: Alarm-Trigger zurücksetzen, damit der Ton erneut ausgelöst werden kann
       alarmTriggered.current = false;
     }
   };
@@ -130,18 +130,17 @@ const Meter = () => {
           const delta = now - lastTimeCheck.current;
           lastTimeCheck.current = now;
 
-          // 🚨 NEUE LOGIK: Messen, wie lange die Schwelle überschritten wird
+          // Alarm-Logik mit Verzögerung
           if (db >= thresholdDb) {
-            // Wenn zu laut: Zeit akkumulieren
             loudnessDuration.current += delta;
 
-            // Wenn die akkumulierte Zeit den ALARM_DELAY_MS überschreitet: ALARM!
             if (loudnessDuration.current >= ALARM_DELAY_MS) {
+              // 💡 Aktualisierter Aufruf: löst Ton und UI aus
               setWarning(true);
             }
           } else {
-            // Wenn nicht zu laut: Zähler zurücksetzen
             loudnessDuration.current = 0;
+            // 💡 Aktualisierter Aufruf: stoppt Ton und entfernt UI
             setWarning(false);
           }
         };
@@ -151,25 +150,23 @@ const Meter = () => {
       });
   }, [getThresholdDb]);
 
-  // Startet das Audio-Processing neu, wenn sich der Schwellenwert ändert
+  // ... (Rest der Funktionen bleibt unverändert)
+
   useEffect(() => {
     getMedia();
   }, [getMedia]);
 
   useEffect(() => {
     const intervalId = setInterval(() => {
-      // Aktualisiert die Balken
       volumeRefs.current.unshift(volume.current);
       volumeRefs.current.pop();
 
-      // Aktualisiert den sichtbaren DB-Wert (zieht den aktuellen, GEGLÄTTETEN DB-Wert)
       setCurrentDb(currentSmoothedDb.current);
 
       const thresholdDb = getThresholdDb();
       for (let i = 0; i < refs.current.length; i++) {
         if (refs.current[i]) {
           const barVolume = volumeRefs.current[i];
-          // Färbung basiert auf der Lautstärke der einzelnen Balken
           const isBarLoud = volumeToDb(barVolume) >= thresholdDb;
 
           refs.current[i].style.transform = `scaleY(${
