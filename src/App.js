@@ -1,8 +1,6 @@
 import React, { useEffect, useRef, useState, useCallback } from "react";
 import "./styles.css";
 
-// ... (Rest der Konstanten und Hilfsfunktionen bleibt unverändert)
-
 const settings = {
   bars: 30,
   width: 10,
@@ -16,19 +14,41 @@ const MAX_ANALYZER_VALUE = 255;
 const MIN_THRESHOLD = 1;
 
 // Konstanten für die dB-Skala
-const MAX_DB = 100;
+const MAX_DB = 90; // Realistischerer Höchstwert (z.B. 90-100 dB)
 const INITIAL_WARNING_DB = 75;
 
 // Hilfsfunktion: Konvertiert Volumen (0-255) zu dB (0-MAX_DB)
+// 🚨 VERBESSERTE DB-BERECHNUNG für realistischere Skalierung
 const volumeToDb = (volume) => {
-  let db = 20 * Math.log10(volume / MAX_ANALYZER_VALUE) + MAX_DB;
-  return Math.max(0, db);
+  // Volumen normalisieren (0 bis 1)
+  const normalizedVolume = volume / MAX_ANALYZER_VALUE;
+
+  // Realistische dB-Skala: 20 * log10(Amplitude)
+  // Wichtig: Die 0-255 Werte des Analysers sind Frequenz-Amplituden, nicht reines RMS.
+  // Wir verwenden einen festen Offset, um 0-dBFS (255) auf MAX_DB zu legen.
+
+  if (normalizedVolume < 0.001) {
+    // Rauschen (entspricht ca. 30 dB)
+    return 30;
+  }
+
+  // Wir nehmen 20 * log10(normVolume) und addieren dann den MAX_DB-Wert,
+  // damit 1.0 (max) genau MAX_DB ergibt.
+  let db = 20 * Math.log10(normalizedVolume) + MAX_DB;
+
+  // Werte auf den realistischen Bereich begrenzen (z.B. 30 dB bis MAX_DB)
+  return Math.min(MAX_DB, Math.max(30, db));
 };
 
 // Hilfsfunktion: Konvertiert dB (0-MAX_DB) zu Volumen (0-255)
 const dbToVolume = (db) => {
-  if (db <= 0) return MIN_THRESHOLD;
+  if (db <= 30) return MIN_THRESHOLD;
+
+  // Umgekehrte Log-Skalierung
+  // dB_DIFF = dB - MAX_DB
+  // VOLUME = MAX_ANALYZER_VALUE * 10^(dB_DIFF / 20)
   let volume = MAX_ANALYZER_VALUE * Math.pow(10, (db - MAX_DB) / 20);
+
   return Math.min(MAX_ANALYZER_VALUE, Math.max(MIN_THRESHOLD, volume));
 };
 
@@ -47,17 +67,28 @@ const Meter = () => {
   const volume = useRef(0);
   const volumeRefs = useRef(new Array(settings.bars).fill(0));
 
+  // NEU: Speichert den geglätteten DB-Wert zur Synchronisation von Anzeige und Alarm
+  const currentSmoothedDb = useRef(0.0);
+
   const airhorn = useRef(null);
   const alarmTriggered = useRef(false);
 
-  // Audioobjekt nur einmal initialisieren
   useEffect(() => {
     airhorn.current = new Audio(AIRHORN_SOUND_URL);
   }, []);
 
-  const setWarning = (loud) => {
-    setIsLoud(loud);
-    if (loud) {
+  // setWarning muss jetzt den DB-Wert-Vergleich durchführen
+  const setWarning = (loud, currentDbValue, thresholdDbValue) => {
+    // 🚨 ÄNDERUNG 2: Warnung wird ausgelöst, wenn der GEGLÄTTETE DB-Wert
+    // den als DB eingegebenen Grenzwert überschreitet.
+    const mustBeLoud = currentDbValue >= thresholdDbValue;
+
+    // Nur den State aktualisieren, wenn sich der Zustand ändert
+    if (mustBeLoud !== isLoud) {
+      setIsLoud(mustBeLoud);
+    }
+
+    if (mustBeLoud) {
       if (!alarmTriggered.current && airhorn.current) {
         airhorn.current.currentTime = 0;
         airhorn.current
@@ -70,6 +101,11 @@ const Meter = () => {
     }
   };
 
+  // Hilfsfunktion, um den DB-Schwellenwert aus dem Volume-Threshold zu bekommen
+  const getThresholdDb = useCallback(() => {
+    return volumeToDb(warningThreshold);
+  }, [warningThreshold]);
+
   const getMedia = useCallback(() => {
     navigator.mediaDevices
       .getUserMedia({ audio: true })
@@ -79,8 +115,7 @@ const Meter = () => {
         const microphone = audioContext.createMediaStreamSource(stream);
         const javascriptNode = audioContext.createScriptProcessor(2048, 1, 1);
 
-        // 🚨 ÄNDERUNG 1: Erhöhen der Glättungskonstante für ruhigere Anzeige
-        // Von 0.4 (schnell) auf 0.7-0.8 (sanft/ruhig) erhöht.
+        // Glättung beibehalten (0.75) für ruhige Messung
         analyser.smoothingTimeConstant = 0.75;
 
         analyser.fftSize = 1024;
@@ -103,46 +138,39 @@ const Meter = () => {
           volume.current = avgVolume;
 
           const db = volumeToDb(avgVolume);
+          // 🚨 ÄNDERUNG 1: Den GEGLÄTTETEN DB-Wert speichern
+          currentSmoothedDb.current = db;
 
-          // ACHTUNG: Wir aktualisieren den DB-State HIER nicht, da das
-          // onaudioprocess zu schnell ist (~40x pro Sekunde).
-          // Wir lassen das nun das setInterval (siehe unten) regeln.
-          // setCurrentDb(db);
-
-          // Lautstärke-Warnlogik verwendet den internen Volume-Threshold
-          if (volume.current > warningThreshold) {
-            setWarning(true);
-          } else {
-            setWarning(false);
-          }
+          // 🚨 ÄNDERUNG 3: Warnlogik RUFT setWarning SOFORT auf,
+          // basierend auf dem GEGLÄTTETEN DB-Wert.
+          const thresholdDb = getThresholdDb();
+          setWarning(db >= thresholdDb, db, thresholdDb);
         };
       })
       .catch(function (err) {
         console.error("Fehler beim Zugriff auf das Mikrofon:", err);
       });
-  }, [warningThreshold]);
+  }, [getThresholdDb]);
 
-  // Startet das Audio-Processing, wenn sich der Schwellenwert ändert
+  // Startet das Audio-Processing neu, wenn sich der Schwellenwert ändert
   useEffect(() => {
     getMedia();
   }, [getMedia]);
 
   useEffect(() => {
-    // 🚨 ÄNDERUNG 2: Aktualisierungsintervall verlangsamt.
-    // Von 20ms (50 FPS) auf 50ms (20 FPS). Ruhigere Anzeige.
+    // Intervall (50ms) wird nur zur Aktualisierung der ANZEIGE verwendet
     const intervalId = setInterval(() => {
       // Aktualisiert die Balken
       volumeRefs.current.unshift(volume.current);
       volumeRefs.current.pop();
 
-      // Aktualisiert den sichtbaren DB-Wert (zieht den aktuellen Volumen-Wert)
-      const db = volumeToDb(volume.current);
-      setCurrentDb(db);
+      // Aktualisiert den sichtbaren DB-Wert (zieht den aktuellen, GEGLÄTTETEN DB-Wert)
+      setCurrentDb(currentSmoothedDb.current);
 
       for (let i = 0; i < refs.current.length; i++) {
         if (refs.current[i]) {
           const barVolume = volumeRefs.current[i];
-          const isBarLoud = barVolume > warningThreshold;
+          const isBarLoud = volumeToDb(barVolume) >= getThresholdDb();
 
           refs.current[i].style.transform = `scaleY(${
             barVolume / MAX_ANALYZER_VALUE
@@ -153,13 +181,12 @@ const Meter = () => {
             : "#00bfa5";
         }
       }
-    }, 50); // <-- Hier ist das neue, langsamere Intervall (50ms)
+    }, 50);
     return () => {
       clearInterval(intervalId);
     };
-  }, [warningThreshold]);
+  }, [getThresholdDb]);
 
-  // ... (Rest der Funktionen createElements, handleDbInputChange, und das Render-JSX bleiben unverändert)
   const createElements = () => {
     let elements = [];
     for (let i = 0; i < settings.bars; i++) {
@@ -193,7 +220,7 @@ const Meter = () => {
 
     setWarningDbInput(value);
 
-    if (isNaN(db) || db < 0 || db > MAX_DB) {
+    if (isNaN(db) || db < 30 || db > MAX_DB) {
       return;
     }
 
@@ -218,7 +245,7 @@ const Meter = () => {
           <input
             id="threshold-db-input"
             type="number"
-            min="0"
+            min="30"
             max={MAX_DB.toFixed(0)}
             step="1"
             value={warningDbInput}
@@ -240,7 +267,7 @@ const Meter = () => {
         }}
       >
         {isLoud && (
-          <div className="alarm-message">⚠️ IHR WURDET ENTDECKT! ⚠️</div>
+          <div className="alarm-message">⚠️ ZU LAUT! KLASSE ENTDECKT! ⚠️</div>
         )}
         {createElements()}
       </div>
