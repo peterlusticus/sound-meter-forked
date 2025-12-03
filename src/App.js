@@ -69,11 +69,10 @@ const Meter = () => {
   // Ref für den 2-Sekunden-Timer
   const alarmTimeoutRef = useRef(null);
 
-  // 🚨 NEU: Ref, um den aktuellen Lautstärke-Grenzwert an die Audio-Schleife zu übergeben.
-  // Startwert ist der initiale, in Volumen konvertierte Schwellenwert.
+  // Ref, um den aktuellen Lautstärke-Grenzwert an die Audio-Schleife zu übergeben.
   const currentVolumeThresholdRef = useRef(dbToVolume(INITIAL_WARNING_DB));
 
-  // 🚨 NEU: Synchronisiert den State mit dem Ref, wann immer der State sich ändert
+  // Synchronisiert den State mit dem Ref, wann immer der State sich ändert
   useEffect(() => {
     currentVolumeThresholdRef.current = warningThreshold;
   }, [warningThreshold]);
@@ -126,10 +125,14 @@ const Meter = () => {
   }, [resetAlarm]);
 
   const getMedia = useCallback(() => {
+    // 🚨 FIX: audioContext muss im Scope von getMedia deklariert werden,
+    // damit die Cleanup-Funktion am Ende darauf zugreifen kann.
+    let audioContext;
+
     navigator.mediaDevices
       .getUserMedia({ audio: true })
       .then((stream) => {
-        const audioContext = new AudioContext();
+        audioContext = new AudioContext(); // Zuweisung hier
         const analyser = audioContext.createAnalyser();
         const microphone = audioContext.createMediaStreamSource(stream);
         const javascriptNode = audioContext.createScriptProcessor(2048, 1, 1);
@@ -157,8 +160,7 @@ const Meter = () => {
           const db = volumeToDb(avgVolume);
           currentSmoothedDb.current = db;
 
-          // 🚨 KORRIGIERT: Liest den Grenzwert direkt aus dem Ref, der immer aktuell ist.
-          // Die `getThresholdDb()` Funktion wird NICHT mehr benötigt (bzw. nur für die Anzeige).
+          // Liest den Grenzwert direkt aus dem Ref, der immer aktuell ist.
           const volumeThreshold = currentVolumeThresholdRef.current;
 
           const now = performance.now();
@@ -168,7 +170,7 @@ const Meter = () => {
           // WICHTIG: Die Alarm-Logik darf nur ausgeführt werden,
           // wenn KEIN Alarm gerade aktiv ist (2-Sekunden-Timer läuft)
           if (!alarmTriggered.current) {
-            // 🚨 KORRIGIERT: Vergleich mit dem Lautstärke-Wert des Ref (0-255)
+            // Vergleich mit dem Lautstärke-Wert des Ref (0-255)
             if (avgVolume >= volumeThreshold) {
               // Wenn zu laut: Zeit zur Duration hinzufügen
               loudnessDuration.current += delta;
@@ -191,6 +193,7 @@ const Meter = () => {
 
     // Rückgabe einer Funktion, um den AudioContext beim Unmount zu schließen
     return () => {
+      // 🚨 FIX: audioContext ist jetzt im Scope definiert
       if (audioContext && audioContext.state !== "closed") {
         audioContext
           .close()
