@@ -103,12 +103,9 @@ const Meter = () => {
         const audioContext = new AudioContext();
         const analyser = audioContext.createAnalyser();
         const microphone = audioContext.createMediaStreamSource(stream);
-        // ScriptProcessorNode ist veraltet, aber für diese Demo geeignet
         const javascriptNode = audioContext.createScriptProcessor(2048, 1, 1);
 
-        // Hohe Glättung (0.75) für ruhige Messung beibehalten
         analyser.smoothingTimeConstant = 0.75;
-
         analyser.fftSize = 1024;
 
         microphone.connect(analyser);
@@ -134,8 +131,6 @@ const Meter = () => {
           const thresholdDb = getThresholdDb();
           const now = performance.now();
           const delta = now - lastTimeCheck.current;
-
-          // 🚨 KORRIGIERT: lastTimeCheck wird NACH der delta-Berechnung aktualisiert.
           lastTimeCheck.current = now;
 
           // Alarm-Logik mit Verzögerung (Hold/Delay)
@@ -147,8 +142,13 @@ const Meter = () => {
               setWarning(true);
             }
           } else {
-            // Wenn nicht mehr laut: Zähler zurücksetzen
-            loudnessDuration.current = 0;
+            // 🚨 KORRIGIERT: Explizite Handhabung des Rücksetzens und Alarms
+            // Wenn die Lautstärke unter den Schwellenwert fällt:
+            if (loudnessDuration.current > 0) {
+              // Setze den Zähler zurück
+              loudnessDuration.current = 0;
+            }
+            // Beende den Alarm und die UI, falls sie aktiv sind
             setWarning(false);
           }
         };
