@@ -8,7 +8,7 @@ const settings = {
 };
 
 const AIRHORN_SOUND_URL = "/airhorn.mp3";
-const ALARM_DELAY_MS = 200; // Alarm erst nach 200ms Überschreitung
+const ALARM_DELAY_MS = 100; // Alarm erst nach 200ms Überschreitung
 
 // ... (Rest der Konstanten und Hilfsfunktionen bleibt unverändert)
 
