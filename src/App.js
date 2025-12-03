@@ -9,9 +9,8 @@ const settings = {
 
 const AIRHORN_SOUND_URL = "/airhorn.mp3";
 
-// 🚨 NEUE KONSTANTE: Alarm erst nach 300ms ANHALTENDER Überschreitung.
-// Dies ignoriert die meisten kurzen "Klakser".
-const ALARM_DELAY_MS = 300;
+// 🚨 NEUE KONSTANTE: Alarm erst nach 50ms ANHALTENDER Überschreitung.
+const ALARM_DELAY_MS = 50;
 
 // Konstanten für die Lautstärkeskala
 const MAX_ANALYZER_VALUE = 255;
