@@ -9,8 +9,10 @@ const settings = {
 
 const AIRHORN_SOUND_URL = "/airhorn.mp3";
 
-// 🚨 NEUE KONSTANTE: Alarm erst nach 50ms ANHALTENDER Überschreitung.
+// Verzögerung: Mindestdauer der Lautstärkeüberschreitung, bevor der Alarm ausgelöst wird (gegen "Klakser")
 const ALARM_DELAY_MS = 50;
+// 🚨 NEU: Feste Dauer des Alarms (2000ms = 2 Sekunden)
+const ALARM_DURATION_MS = 2000;
 
 // Konstanten für die Lautstärkeskala
 const MAX_ANALYZER_VALUE = 255;
@@ -62,35 +64,57 @@ const Meter = () => {
   const lastTimeCheck = useRef(performance.now());
 
   const airhorn = useRef(null);
+  // alarmTriggered.current: Steuert, ob gerade ein Alarmzyklus (2s) aktiv ist
   const alarmTriggered = useRef(false);
+  // 🚨 NEU: Ref für den 2-Sekunden-Timer
+  const alarmTimeoutRef = useRef(null);
 
   useEffect(() => {
     airhorn.current = new Audio(AIRHORN_SOUND_URL);
     airhorn.current.loop = false;
   }, []);
 
-  const setWarning = (loud) => {
-    if (loud !== isLoud) {
-      setIsLoud(loud);
+  // 🚨 NEU: Funktion zum Beenden des Alarms nach der festgelegten Dauer
+  const resetAlarm = useCallback(() => {
+    // 1. UI zurücksetzen
+    setIsLoud(false);
+    // 2. Ton stoppen
+    if (airhorn.current) {
+      airhorn.current.pause();
+      airhorn.current.currentTime = 0;
+    }
+    // 3. Alarm-Zyklus freigeben, damit ein neuer ausgelöst werden kann
+    alarmTriggered.current = false;
+
+    // Timer aufräumen
+    if (alarmTimeoutRef.current) {
+      clearTimeout(alarmTimeoutRef.current);
+      alarmTimeoutRef.current = null;
+    }
+  }, []);
+
+  // 🚨 KORRIGIERT: setWarning startet jetzt NUR den 2-Sekunden-Zyklus
+  const setWarning = useCallback(() => {
+    // Wenn der Alarm bereits läuft, beenden wir hier
+    if (alarmTriggered.current) return;
+
+    // 1. Alarm-Zyklus starten
+    alarmTriggered.current = true;
+
+    // 2. UI und Ton starten
+    setIsLoud(true);
+    if (airhorn.current) {
+      airhorn.current.currentTime = 0;
+      airhorn.current
+        .play()
+        .catch((e) => console.error("Fehler beim Abspielen des Tons:", e));
     }
 
-    if (loud) {
-      if (!alarmTriggered.current && airhorn.current) {
-        airhorn.current.currentTime = 0;
-        airhorn.current
-          .play()
-          .catch((e) => console.error("Fehler beim Abspielen des Tons:", e));
-
-        alarmTriggered.current = true;
-      }
-    } else {
-      if (airhorn.current) {
-        airhorn.current.pause();
-        airhorn.current.currentTime = 0;
-      }
-      alarmTriggered.current = false;
-    }
-  };
+    // 3. Timer setzen, der den Alarm nach ALARM_DURATION_MS beendet
+    alarmTimeoutRef.current = setTimeout(() => {
+      resetAlarm();
+    }, ALARM_DURATION_MS);
+  }, [resetAlarm]); // Abhängigkeit von resetAlarm
 
   const getThresholdDb = useCallback(() => {
     return volumeToDb(warningThreshold);
@@ -133,30 +157,30 @@ const Meter = () => {
           const delta = now - lastTimeCheck.current;
           lastTimeCheck.current = now;
 
-          // Alarm-Logik mit Verzögerung (Hold/Delay)
-          if (db >= thresholdDb) {
-            // Wenn zu laut: Zeit zur Duration hinzufügen
-            loudnessDuration.current += delta;
+          // 🚨 WICHTIG: Die Alarm-Logik darf nur ausgeführt werden,
+          // wenn KEIN Alarm gerade aktiv ist (2-Sekunden-Timer läuft)
+          if (!alarmTriggered.current) {
+            if (db >= thresholdDb) {
+              // Wenn zu laut: Zeit zur Duration hinzufügen
+              loudnessDuration.current += delta;
 
-            if (loudnessDuration.current >= ALARM_DELAY_MS) {
-              setWarning(true);
-            }
-          } else {
-            // 🚨 KORRIGIERT: Explizite Handhabung des Rücksetzens und Alarms
-            // Wenn die Lautstärke unter den Schwellenwert fällt:
-            if (loudnessDuration.current > 0) {
-              // Setze den Zähler zurück
+              if (loudnessDuration.current >= ALARM_DELAY_MS) {
+                // Alarm auslösen und 2-Sekunden-Timer starten
+                setWarning();
+                loudnessDuration.current = 0; // Zähler zurücksetzen
+              }
+            } else {
+              // Nicht laut genug: Zähler zurücksetzen
               loudnessDuration.current = 0;
             }
-            // Beende den Alarm und die UI, falls sie aktiv sind
-            setWarning(false);
           }
+          // KEIN setWarning(false) Aufruf hier! Der Timer übernimmt das Reset.
         };
       })
       .catch(function (err) {
         console.error("Fehler beim Zugriff auf das Mikrofon:", err);
       });
-  }, [getThresholdDb]);
+  }, [getThresholdDb, setWarning]); // setWarning ist jetzt eine Abhängigkeit
 
   useEffect(() => {
     getMedia();
@@ -193,6 +217,8 @@ const Meter = () => {
     };
   }, [getThresholdDb]);
 
+  // ... (createElements Funktion bleibt unverändert)
+
   const createElements = () => {
     let elements = [];
     for (let i = 0; i < settings.bars; i++) {
@@ -226,6 +252,7 @@ const Meter = () => {
 
     setWarningDbInput(value);
 
+    // 🚨 WICHTIG: setWarningThreshold wird auch bei ungültigen Eingaben NICHT aktualisiert
     if (isNaN(db) || db < 30 || db > MAX_DB) {
       return;
     }
