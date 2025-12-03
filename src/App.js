@@ -11,7 +11,7 @@ const AIRHORN_SOUND_URL = "/airhorn.mp3";
 
 // Verzögerung: Mindestdauer der Lautstärkeüberschreitung, bevor der Alarm ausgelöst wird (gegen "Klakser")
 const ALARM_DELAY_MS = 50;
-// 🚨 NEU: Feste Dauer des Alarms (2000ms = 2 Sekunden)
+// Feste Dauer des Alarms (2000ms = 2 Sekunden)
 const ALARM_DURATION_MS = 2000;
 
 // Konstanten für die Lautstärkeskala
@@ -66,15 +66,24 @@ const Meter = () => {
   const airhorn = useRef(null);
   // alarmTriggered.current: Steuert, ob gerade ein Alarmzyklus (2s) aktiv ist
   const alarmTriggered = useRef(false);
-  // 🚨 NEU: Ref für den 2-Sekunden-Timer
+  // Ref für den 2-Sekunden-Timer
   const alarmTimeoutRef = useRef(null);
+
+  // 🚨 NEU: Ref, um den aktuellen Lautstärke-Grenzwert an die Audio-Schleife zu übergeben.
+  // Startwert ist der initiale, in Volumen konvertierte Schwellenwert.
+  const currentVolumeThresholdRef = useRef(dbToVolume(INITIAL_WARNING_DB));
+
+  // 🚨 NEU: Synchronisiert den State mit dem Ref, wann immer der State sich ändert
+  useEffect(() => {
+    currentVolumeThresholdRef.current = warningThreshold;
+  }, [warningThreshold]);
 
   useEffect(() => {
     airhorn.current = new Audio(AIRHORN_SOUND_URL);
     airhorn.current.loop = false;
   }, []);
 
-  // 🚨 NEU: Funktion zum Beenden des Alarms nach der festgelegten Dauer
+  // Funktion zum Beenden des Alarms nach der festgelegten Dauer
   const resetAlarm = useCallback(() => {
     // 1. UI zurücksetzen
     setIsLoud(false);
@@ -93,7 +102,7 @@ const Meter = () => {
     }
   }, []);
 
-  // 🚨 KORRIGIERT: setWarning startet jetzt NUR den 2-Sekunden-Zyklus
+  // setWarning startet jetzt NUR den 2-Sekunden-Zyklus
   const setWarning = useCallback(() => {
     // Wenn der Alarm bereits läuft, beenden wir hier
     if (alarmTriggered.current) return;
@@ -114,11 +123,7 @@ const Meter = () => {
     alarmTimeoutRef.current = setTimeout(() => {
       resetAlarm();
     }, ALARM_DURATION_MS);
-  }, [resetAlarm]); // Abhängigkeit von resetAlarm
-
-  const getThresholdDb = useCallback(() => {
-    return volumeToDb(warningThreshold);
-  }, [warningThreshold]);
+  }, [resetAlarm]);
 
   const getMedia = useCallback(() => {
     navigator.mediaDevices
@@ -147,20 +152,24 @@ const Meter = () => {
           }
 
           const avgVolume = values / length;
-          volume.current = avgVolume;
+          volume.current = avgVolume; // Der aktuelle Lautstärke-Wert (0-255)
 
           const db = volumeToDb(avgVolume);
           currentSmoothedDb.current = db;
 
-          const thresholdDb = getThresholdDb();
+          // 🚨 KORRIGIERT: Liest den Grenzwert direkt aus dem Ref, der immer aktuell ist.
+          // Die `getThresholdDb()` Funktion wird NICHT mehr benötigt (bzw. nur für die Anzeige).
+          const volumeThreshold = currentVolumeThresholdRef.current;
+
           const now = performance.now();
           const delta = now - lastTimeCheck.current;
           lastTimeCheck.current = now;
 
-          // 🚨 WICHTIG: Die Alarm-Logik darf nur ausgeführt werden,
+          // WICHTIG: Die Alarm-Logik darf nur ausgeführt werden,
           // wenn KEIN Alarm gerade aktiv ist (2-Sekunden-Timer läuft)
           if (!alarmTriggered.current) {
-            if (db >= thresholdDb) {
+            // 🚨 KORRIGIERT: Vergleich mit dem Lautstärke-Wert des Ref (0-255)
+            if (avgVolume >= volumeThreshold) {
               // Wenn zu laut: Zeit zur Duration hinzufügen
               loudnessDuration.current += delta;
 
@@ -174,17 +183,34 @@ const Meter = () => {
               loudnessDuration.current = 0;
             }
           }
-          // KEIN setWarning(false) Aufruf hier! Der Timer übernimmt das Reset.
         };
       })
       .catch(function (err) {
         console.error("Fehler beim Zugriff auf das Mikrofon:", err);
       });
-  }, [getThresholdDb, setWarning]); // setWarning ist jetzt eine Abhängigkeit
 
+    // Rückgabe einer Funktion, um den AudioContext beim Unmount zu schließen
+    return () => {
+      if (audioContext && audioContext.state !== "closed") {
+        audioContext
+          .close()
+          .catch((e) =>
+            console.error("Fehler beim Schließen des AudioContext:", e)
+          );
+      }
+    };
+  }, [setWarning]); // Nur setWarning ist jetzt eine Abhängigkeit
+
+  // Ruft getMedia einmal beim Start auf und verwendet die Cleanup-Funktion
   useEffect(() => {
-    getMedia();
+    const cleanup = getMedia();
+    return cleanup;
   }, [getMedia]);
+
+  // Wird nur für die Anzeige im UI verwendet
+  const getThresholdDb = useCallback(() => {
+    return volumeToDb(warningThreshold);
+  }, [warningThreshold]);
 
   useEffect(() => {
     // Intervall (50ms) zur Aktualisierung der ANZEIGE
@@ -216,8 +242,6 @@ const Meter = () => {
       clearInterval(intervalId);
     };
   }, [getThresholdDb]);
-
-  // ... (createElements Funktion bleibt unverändert)
 
   const createElements = () => {
     let elements = [];
@@ -252,7 +276,7 @@ const Meter = () => {
 
     setWarningDbInput(value);
 
-    // 🚨 WICHTIG: setWarningThreshold wird auch bei ungültigen Eingaben NICHT aktualisiert
+    // WICHTIG: setWarningThreshold wird auch bei ungültigen Eingaben NICHT aktualisiert
     if (isNaN(db) || db < 30 || db > MAX_DB) {
       return;
     }
