@@ -19,26 +19,34 @@ const MAX_ANALYZER_VALUE = 255;
 const MIN_THRESHOLD = 1;
 
 // Konstanten für die dB-Skala
+// AUF 90 dB gesetzt, um genügend Headroom für laute Geräusche zu haben
 const MAX_DB = 90;
+const MIN_DB_FLOOR = 30; // Realistischer Grundrauschpegel (z.B. ruhiger Raum)
 const INITIAL_WARNING_DB = 75;
 
 // Hilfsfunktion: Konvertiert Volumen (0-255) zu dB (0-MAX_DB)
 const volumeToDb = (volume) => {
   const normalizedVolume = volume / MAX_ANALYZER_VALUE;
 
-  if (normalizedVolume < 0.001) {
-    return 30;
+  // Setzt einen realistischen Grundrauschpegel für absolute Stille
+  if (volume <= MIN_THRESHOLD) {
+    return MIN_DB_FLOOR;
   }
 
+  // Logarithmische Berechnung der Dezibel (20 * log10(A/A_ref) + dB_ref)
+  // 20*log10 wird für Amplitudenwerte verwendet.
   let db = 20 * Math.log10(normalizedVolume) + MAX_DB;
 
-  return Math.min(MAX_DB, Math.max(30, db));
+  // Max-Wert ist MAX_DB, Minimum wird auf den Grundrauschpegel gesetzt.
+  return Math.min(MAX_DB, Math.max(MIN_DB_FLOOR, db));
 };
 
-// Hilfsfunktion: Konvertiert dB (0-MAX_DB) zu Volumen (0-255)
+// Hilfsfunktion: Konvertiert dB (MIN_DB_FLOOR-MAX_DB) zu Volumen (0-255)
 const dbToVolume = (db) => {
-  if (db <= 30) return MIN_THRESHOLD;
+  // Stellt sicher, dass dB nicht unter dem Grundrauschpegel liegt
+  if (db <= MIN_DB_FLOOR) return MIN_THRESHOLD;
 
+  // Reziproke exponentielle Formel zur Umwandlung von dB in Volumen
   let volume = MAX_ANALYZER_VALUE * Math.pow(10, (db - MAX_DB) / 20);
 
   return Math.min(MAX_ANALYZER_VALUE, Math.max(MIN_THRESHOLD, volume));
@@ -78,6 +86,8 @@ const Meter = () => {
   }, [warningThreshold]);
 
   useEffect(() => {
+    // Stellen Sie sicher, dass Sie eine lokale oder im Browser verfügbare Audioquelle verwenden.
+    // Dieser Ton wird beim Start geladen.
     airhorn.current = new Audio(AIRHORN_SOUND_URL);
     airhorn.current.loop = false;
   }, []);
@@ -125,7 +135,7 @@ const Meter = () => {
   }, [resetAlarm]);
 
   const getMedia = useCallback(() => {
-    // 🚨 FIX: audioContext muss im Scope von getMedia deklariert werden,
+    // audioContext muss im Scope von getMedia deklariert werden,
     // damit die Cleanup-Funktion am Ende darauf zugreifen kann.
     let audioContext;
 
@@ -193,7 +203,7 @@ const Meter = () => {
 
     // Rückgabe einer Funktion, um den AudioContext beim Unmount zu schließen
     return () => {
-      // 🚨 FIX: audioContext ist jetzt im Scope definiert
+      // audioContext ist jetzt im Scope definiert
       if (audioContext && audioContext.state !== "closed") {
         audioContext
           .close()
@@ -280,7 +290,8 @@ const Meter = () => {
     setWarningDbInput(value);
 
     // WICHTIG: setWarningThreshold wird auch bei ungültigen Eingaben NICHT aktualisiert
-    if (isNaN(db) || db < 30 || db > MAX_DB) {
+    // Die Max-Grenze ist jetzt 90 dB, Min-Grenze ist 30 dB (Grundrauschpegel).
+    if (isNaN(db) || db < MIN_DB_FLOOR || db > MAX_DB) {
       return;
     }
 
@@ -305,7 +316,8 @@ const Meter = () => {
           <input
             id="threshold-db-input"
             type="number"
-            min="30"
+            // Die Minimum- und Maximum-Werte des Eingabefelds wurden an die neue MAX_DB und den Rauschpegel angepasst.
+            min={MIN_DB_FLOOR.toFixed(0)}
             max={MAX_DB.toFixed(0)}
             step="1"
             value={warningDbInput}
