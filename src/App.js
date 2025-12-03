@@ -9,19 +9,28 @@ const settings = {
 
 const AIRHORN_SOUND_URL = "/airhorn.mp3";
 
-// Neuer Standardwert für den Schwellenwert (z.B. 100, nun die Mitte des Bereichs 0-200)
-const INITIAL_WARNING_THRESHOLD = 50; 
-const MAX_THRESHOLD = 200; // Angepasster Maximalwert
-const MIN_THRESHOLD = 1; // Minimaler Wert bleibt 1
+// Standardwerte (0-255 vom Analyser)
+const MAX_ANALYZER_VALUE = 255;
+const INITIAL_WARNING_THRESHOLD = 150; // Höherer Standardwert für 0-255-Bereich
+const MAX_THRESHOLD = MAX_ANALYZER_VALUE;
+const MIN_THRESHOLD = 1;
+
+// Konstante für die dB-Berechnung (Annahme: Max. 0 dB bei MAX_ANALYZER_VALUE)
+// Die genaue dB-Skala ist komplex, dies ist eine Annäherung für die Visualisierung.
+// Wir nehmen den MAX_DB-Wert an, um eine Skala zu haben.
+const MAX_DB = 100;
 
 const Meter = () => {
   const [warningThreshold, setWarningThreshold] = useState(
     INITIAL_WARNING_THRESHOLD
   );
   const [isLoud, setIsLoud] = useState(false);
+  const [currentVolume, setCurrentVolume] = useState(0); // NEU: Aktueller Volumen-Wert (0-255)
+  const [currentDb, setCurrentDb] = useState(-Infinity); // NEU: Aktueller Dezibel-Wert
+
   const refs = useRef([]);
   const volume = useRef(0);
-  const volumeRefs = useRef(new Array(settings.bars));
+  const volumeRefs = useRef(new Array(settings.bars).fill(0));
 
   const airhorn = useRef(null);
   const alarmTriggered = useRef(false);
@@ -57,9 +66,6 @@ const Meter = () => {
         const javascriptNode = audioContext.createScriptProcessor(2048, 1, 1);
         analyser.smoothingTimeConstant = 0.4;
         analyser.fftSize = 1024;
-        // Wichtig: Die getByteFrequencyData liefert Werte von 0-255.
-        // Die Berechnung des Durchschnitts (volume.current) kann theoretisch bis zu 255 gehen.
-        // Daher ist MAX_THRESHOLD = 200 (oder 255) sinnvoll.
 
         microphone.connect(analyser);
         analyser.connect(javascriptNode);
@@ -75,9 +81,19 @@ const Meter = () => {
             values += array[i];
           }
 
-          volume.current = values / length;
+          const avgVolume = values / length;
+          volume.current = avgVolume;
 
-          // Lautstärke-Warnlogik verwendet jetzt den State warningThreshold
+          // dB-Berechnung (approximiert)
+          // dBFS (Dezibel Full Scale): Bezugspunkt ist der maximale digitale Wert
+          // Hier eine Log-Skalierung, um den Lautstärkeeindruck besser abzubilden.
+          let db = 20 * Math.log10(avgVolume / MAX_ANALYZER_VALUE) + MAX_DB;
+          if (db < 0) db = 0; // Negative Werte auf 0 begrenzen
+
+          setCurrentVolume(avgVolume);
+          setCurrentDb(db); // Aktualisiert den DB-Wert
+
+          // Lautstärke-Warnlogik
           if (volume.current > warningThreshold) {
             setWarning(true);
           } else {
@@ -90,8 +106,7 @@ const Meter = () => {
       });
   }, [warningThreshold]);
 
-  // Startet das Audio-Processing neu, wenn sich der Schwellenwert ändert,
-  // damit die onaudioprocess-Funktion den neuen Wert verwenden kann.
+  // Startet das Audio-Processing, wenn sich der Schwellenwert ändert
   useEffect(() => {
     getMedia();
   }, [getMedia]);
@@ -101,21 +116,21 @@ const Meter = () => {
       // Aktualisiert die Balken
       volumeRefs.current.unshift(volume.current);
       volumeRefs.current.pop();
+
       for (let i = 0; i < refs.current.length; i++) {
         if (refs.current[i]) {
-          const isBarLoud = volumeRefs.current[i] > warningThreshold;
+          const barVolume = volumeRefs.current[i];
+          const isBarLoud = barVolume > warningThreshold;
 
-          // HINWEIS: Die Skalierung (volumeRefs.current[i] / 100) funktioniert
-          // besser mit einer Skalierung auf 200, d.h. (volumeRefs.current[i] / 200).
-          // Da der Balken nur bis zur Größe des Containers wachsen soll,
-          // behalten wir 100 bei, oder verwenden `volumeRefs.current[i] / MAX_THRESHOLD`.
-          // Für diesen Fall verwenden wir MAX_THRESHOLD als Skalierungsbasis
-          // um die Balkenhöhe relativ zum max. Wert zu halten.
+          // Skalierung relativ zum maximal möglichen Wert (255)
           refs.current[i].style.transform = `scaleY(${
-            volumeRefs.current[i] / MAX_THRESHOLD
+            barVolume / MAX_ANALYZER_VALUE
           })`;
-          
-          refs.current[i].style.background = isBarLoud ? "red" : "#7ED321";
+
+          // Klarere Farben für modernes Design
+          refs.current[i].style.background = isBarLoud
+            ? "rgb(255, 99, 71)" // Tomato Red
+            : "#00bfa5"; // Türkis/Cyan
         }
       }
     }, 20);
@@ -137,16 +152,20 @@ const Meter = () => {
           }}
           key={`vu-${i}`}
           style={{
-            background: "#7ED321",
+            background: "#00bfa5",
             minWidth: settings.width + "px",
             flexGrow: 1,
 
-            borderRadius: settings.width + "px",
-            height: Math.sin((i / settings.bars) * 4) * settings.height + "px",
+            // Entfernt die Sinus-Höhen-Berechnung für einheitlichere Balken
+            // height: Math.sin((i / settings.bars) * 4) * settings.height + "px",
+            height: settings.height + "px",
 
             transformOrigin: "bottom",
-            margin: "0 2px",
+            margin: "0 1px", // Schmalere Ränder zwischen den Balken
             alignSelf: "flex-end",
+
+            // Modernes, klares Design: keine abgerundeten Ecken
+            borderRadius: "0",
           }}
         />
       );
@@ -154,73 +173,51 @@ const Meter = () => {
     return elements;
   };
 
+  // Hilfsfunktion zur Umrechnung des Schwellenwerts in einen approximierten DB-Wert
+  const thresholdToDb = (threshold) => {
+    let db = 20 * Math.log10(threshold / MAX_ANALYZER_VALUE) + MAX_DB;
+    return Math.max(0, db).toFixed(1);
+  };
+
   return (
-    <div
-      style={{
-        position: "relative",
-        width: "100%",
-        height: settings.height + 40 + "px",
-        display: "flex",
-        justifyContent: "space-between",
-        alignItems: "flex-end",
-        background: "#1a2024",
-        padding: "10px",
-        borderRadius: "5px",
-        boxShadow: "inset 0 0 5px rgba(0,0,0,0.8)",
-      }}
-    >
-      {/* Regler-Element (Slider) mit aktualisierten Werten */}
-      <div
-        style={{
-          position: "absolute",
-          top: "10px",
-          right: "10px",
-          zIndex: 10,
-          background: "rgba(255, 255, 255, 0.1)",
-          padding: "5px 10px",
-          borderRadius: "5px",
-          color: "white",
-          fontSize: "12px",
-          display: "flex",
-          alignItems: "center",
-          gap: "10px",
-        }}
-      >
-        <span>
-          Auslöser-Schwelle: **{warningThreshold}** (Min: {MIN_THRESHOLD}, Max:{" "}
-          {MAX_THRESHOLD})
-        </span>
+    <div className="meter-container-wrapper">
+      <div className="control-panel">
+        <h3>Volume Control 📊</h3>
+        <p className="db-display">
+          **Aktuelle DB:** **{currentDb.toFixed(1)}** dB (Max:{" "}
+          {MAX_DB.toFixed(0)} dB)
+        </p>
+
+        <label htmlFor="threshold-slider">
+          Auslöser-Schwelle: **{thresholdToDb(warningThreshold)}** dB
+          <span className="volume-val"> (Vol: {warningThreshold})</span>
+        </label>
         <input
+          id="threshold-slider"
           type="range"
           min={MIN_THRESHOLD}
-          // Max auf 200 gesetzt
-          max={MAX_THRESHOLD} 
+          max={MAX_THRESHOLD}
           value={warningThreshold}
           onChange={(e) => setWarningThreshold(Number(e.target.value))}
-          style={{ width: "150px" }}
+          className="threshold-slider"
         />
+        <p className="threshold-info">
+          **Warnung ab:** Vol: {warningThreshold} (DB:{" "}
+          {thresholdToDb(warningThreshold)})
+        </p>
       </div>
-      {isLoud && (
-        <div
-          style={{
-            position: "absolute",
-            top: 0,
-            left: 0,
-            right: 0,
-            textAlign: "center",
-            color: "black",
-            fontWeight: "bold",
-            fontFamily: "arial",
-            fontSize: "20px",
-            background: "red",
-            padding: "5px",
-            textShadow: "0 0 5px yellow, 0 0 10px orange",
-          }}
-        >
-          ⚠️ IHR WURDET ENTDECKT! ⚠️
-        </div>
-      )}
-      {createElements()}
+
+      <div
+        className="meter-visualizer"
+        style={{
+          height: settings.height + "px",
+        }}
+      >
+        {isLoud && (
+          <div className="alarm-message">⚠️ IHR WURDET ENTDECKT! ⚠️</div>
+        )}
+        {createElements()}
+      </div>
     </div>
   );
 };

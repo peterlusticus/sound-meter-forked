@@ -3,38 +3,112 @@
 /* Grundlegendes Styling für den gesamten Körper */
 body {
   margin: 0;
-  font-family: "Courier New", Courier, monospace; /* Eine Schriftart, die an alte Displays erinnert */
-  background-color: #333; /* Dunkler Hintergrund für den "Raum" */
-  color: #c0c0c0; /* Heller, gedämpfter Text */
-  overflow-x: hidden; /* Verhindert horizontalen Scrollbalken */
+  /* Klare, moderne Schriftart */
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen,
+    Ubuntu, Cantarell, "Open Sans", "Helvetica Neue", sans-serif;
+  background-color: #f0f2f5; /* Sehr heller, klarer Hintergrund */
+  color: #333; /* Dunkle, gut lesbare Schrift */
+  overflow-x: hidden;
 }
 
 .App {
   width: 100vw;
-  padding: 20px; /* Mehr Padding für den "Rahmen" des Geräts */
+  padding: 40px;
   box-sizing: border-box;
   margin: 0;
   display: flex;
   justify-content: center;
-  align-items: center; /* Zentriert den Meter vertikal */
-  min-height: 100vh; /* Macht die App bildschirmfüllend */
+  align-items: center;
+  min-height: 100vh;
+  background-color: #f0f2f5; /* Sicherstellen, dass der Hintergrund hell bleibt */
 
-  /* NEU: Hintergrund für das "Fernmeldesystem-Panel" */
-  background-color: #2e3d3e; /* Dunkles Olivgrün / Grau */
-  background-image: repeating-linear-gradient(
-      0deg,
-      #3a4a4b 0px,
-      #3a4a4b 1px,
-      transparent 1px,
-      transparent 100px
-    ),
-    /* Dezente Linien */
-      url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxMDAlIiBoZWlnaHQ9IjEwMCUiPjxwYXR0ZXJuIGlkPSJncmlkIiB3aWR0aD0iMjAiIGhlaWdodD0iMjAiIHBhdHRlcm5Vbml0cz0idXNlclNwYWNlT25Vc2UiPjxyZWN0IHdpZHRoPSIxIiBoZWlnaHQ9IjEiIHg9IjAiIHk9IjAiIGZpbGw9IiM0NDQ0NDQiLz48L3BhdHRlcm4+PHJlY3Qgd2lkdGg9IjEwMCUiIGhlaWdodD0iMTAwJSIgZmlsbD0idXJsKCNncmlkKSIvPjwvc3ZnPg=="); /* Dezentes Rauschen/Gitter */
-  background-size: 100%, 20px 20px;
-  background-blend-mode: overlay; /* Mischt die Hintergrundbilder */
+  /* Entfernt alle militärischen/technischen/gitterartigen Styles */
+  border: none;
+  box-shadow: none;
+}
 
-  border: 5px solid #1a2024; /* Dicker, dunkler Rahmen */
-  border-radius: 10px; /* Abgerundete Ecken */
-  box-shadow: inset 0 0 10px rgba(0, 0, 0, 0.8),
-    /* Innerer Schatten für Tiefe */ 0 5px 15px rgba(0, 0, 0, 0.5); /* Äußerer Schatten */
+.meter-container-wrapper {
+  display: flex;
+  /* Der Container für das Steuerelement und den Visualizer */
+  width: 90%;
+  max-width: 1200px;
+  background-color: #fff; /* Haupt-Panel weiß */
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+  border-radius: 8px;
+  padding: 20px;
+  gap: 20px;
+}
+
+/* --- Control Panel (Steuerungskasten) --- */
+.control-panel {
+  flex-shrink: 0;
+  width: 250px;
+  padding: 15px;
+  border-right: 1px solid #ddd; /* Dezente Trennlinie */
+  color: #333;
+}
+
+.control-panel h3 {
+  color: #007bff; /* Primärfarbe */
+  margin-top: 0;
+  border-bottom: 2px solid #007bff;
+  padding-bottom: 5px;
+}
+
+.db-display {
+  font-size: 1.5em;
+  font-weight: bold;
+  color: #333;
+  margin: 10px 0;
+  padding: 5px;
+  background-color: #eee;
+  border-radius: 4px;
+  text-align: center;
+}
+
+.threshold-slider {
+  width: 100%;
+  margin: 10px 0;
+}
+
+.threshold-info {
+  font-size: 0.8em;
+  color: #666;
+}
+
+/* --- Meter Visualizer (Lautstärkebalken) --- */
+.meter-visualizer {
+  flex-grow: 1;
+  display: flex;
+  justify-content: center; /* Zentriert die Balken horizontal */
+  align-items: flex-end; /* Balken starten unten */
+  position: relative;
+  background: #eee; /* Hellerer Hintergrund für den Visualizer */
+  padding: 10px;
+  border-radius: 4px;
+}
+
+/* Die einzelnen Lautstärkebalken */
+.meter-visualizer > div:not(.alarm-message) {
+  /* Sicherstellen, dass die Balken selbst flexibel und gleichmäßig sind */
+  transition: transform 0.05s ease-out, background 0.1s ease-in;
+  min-width: 8px; /* Kann hier festgelegt oder aus JS überschrieben werden */
+}
+
+/* Alarmmeldung */
+.alarm-message {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  text-align: center;
+  color: white; /* Weißer Text */
+  font-weight: bold;
+  font-family: inherit;
+  font-size: 24px;
+  background: rgb(255, 99, 71); /* Roter Alarm-Hintergrund */
+  padding: 10px;
+  z-index: 20;
+  border-radius: 4px;
+  box-shadow: 0 0 10px rgba(255, 0, 0, 0.5);
 }
