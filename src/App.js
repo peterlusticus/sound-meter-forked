@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState, useCallback } from "react";
 // Importieren Sie das Stylesheet für die Ästhetik
-import "./styles.css";
+import "./styles.css"; 
 
 // --- KONSTANTEN UND EINSTELLUNGEN ---
 
@@ -11,8 +11,9 @@ const settings = {
 };
 
 // NEUE KONSTANTEN FÜR DIE VISUALISIERUNG
-const METER_DECAY_FACTOR = 0.96; // Faktor für den langsamen Zerfall des historischen Spuren
-const LIVE_BAR_COUNT = 3; // Die ersten 3 Balken zeigen den Live-Wert (kein Zerfall)
+// Der Zerfallsfaktor ist nun funktionslos, da wir die Balken einfrieren.
+const METER_DECAY_FACTOR = 0.96; 
+const LIVE_BAR_COUNT = 3;         // Die ersten 3 Balken zeigen den Live-Wert (kein Zerfall)
 
 // Verwenden Sie eine URL, die lokal oder im Browser verfügbar ist
 const AIRHORN_SOUND_URL = "/airhorn.mp3";
@@ -60,14 +61,12 @@ const Meter = () => {
 
   const [isLoud, setIsLoud] = useState(false);
   const [currentDb, setCurrentDb] = useState(0.0);
-
-  // State für die Visualisierung der Balken (RMS-Werte), jetzt mit Zerfall
-  const [barVolumes, setBarVolumes] = useState(
-    new Array(settings.bars).fill(0)
-  );
+  
+  // State für die Visualisierung der Balken (RMS-Werte)
+  const [barVolumes, setBarVolumes] = useState(new Array(settings.bars).fill(0));
 
   // volume.current speichert den aktuellen RMS-Wert (0-128) vom Audio-Thread
-  const volume = useRef(0);
+  const volume = useRef(0); 
 
   const currentSmoothedDb = useRef(0.0);
   const loudnessDuration = useRef(0);
@@ -136,7 +135,7 @@ const Meter = () => {
         const javascriptNode = audioContext.createScriptProcessor(2048, 1, 1);
 
         // ERHÖHT: Glättung für ruhigere Bewegung
-        analyser.smoothingTimeConstant = 0.85;
+        analyser.smoothingTimeConstant = 0.85; 
         analyser.fftSize = 1024;
 
         microphone.connect(analyser);
@@ -206,46 +205,52 @@ const Meter = () => {
     return amplitudeToDb(warningThreshold);
   }, [warningThreshold]);
 
-  // EFFEKT: Datenverschiebung, Zerfall und State-Update (löst das "Zittern")
+  // EFFEKT: Datenverschiebung (Shift) und Einfrierung (Freeze)
   useEffect(() => {
     // Intervall (50ms) zur Aktualisierung der ANZEIGE
     const intervalId = setInterval(() => {
-      // 1. Aktuellen Live-RMS-Wert holen
-      const currentRms = volume.current;
+      
+      const currentRms = volume.current; 
 
-      // Wir erstellen eine Kopie des aktuellen Visualisierungs-States, um es zu manipulieren
-      setBarVolumes((prevVolumes) => {
-        const newVolumes = [...prevVolumes];
-
-        // 2. Datenverschiebung (Shiften)
-        // Füge den NEUESTEN Live-Wert vorne an
-        newVolumes.unshift(currentRms);
-        // Entferne den ÄLTESTEN Wert hinten
-        newVolumes.pop();
-
-        // 3. Peak-Hold- und Decay-Logik für die historische Spur
-        for (let i = LIVE_BAR_COUNT; i < settings.bars; i++) {
-          // Wende den Zerfall nur auf die historische Spur an (ab Index LIVE_BAR_COUNT)
-          // Da der Wert jetzt langsam zerfällt (statt zu springen), wird das Zittern beseitigt.
-          newVolumes[i] = newVolumes[i] * METER_DECAY_FACTOR;
-
-          // Stelle sicher, dass der Wert nicht unter den Grundrauschpegel fällt
-          if (newVolumes[i] < MIN_AMPLITUDE_FLOOR) {
-            newVolumes[i] = MIN_AMPLITUDE_FLOOR;
+      setBarVolumes(prevVolumes => {
+          const newVolumes = new Array(settings.bars);
+          
+          // 1. Live Zone (ersten LIVE_BAR_COUNT Balken)
+          // Diese zeigen immer den aktuellen RMS-Wert
+          for (let i = 0; i < LIVE_BAR_COUNT; i++) {
+              newVolumes[i] = currentRms;
           }
-        }
 
-        return newVolumes;
+          // 2. Historische Zone (Shift und Freeze)
+          // newVolumes[i] bekommt den Wert, der vorher in i-1 war (Verschiebung)
+          for (let i = LIVE_BAR_COUNT; i < settings.bars; i++) {
+              // Kopiert den vorherigen Wert von i-1 in die aktuelle Position i
+              // Wenn i == LIVE_BAR_COUNT, kopieren wir den letzten Wert aus der Live-Zone
+              // Wenn i > LIVE_BAR_COUNT, kopieren wir den bereits eingefrorenen historischen Wert
+              const previousValue = prevVolumes[i - 1] || MIN_AMPLITUDE_FLOOR;
+              newVolumes[i] = previousValue;
+              
+              // Füge einen Floor hinzu, falls die Musik plötzlich stoppt
+              if (newVolumes[i] < MIN_AMPLITUDE_FLOOR) {
+                  newVolumes[i] = MIN_AMPLITUDE_FLOOR;
+              }
+          }
+          
+          // 3. Der allerletzte Balken fällt aus dem Diagramm und wird auf Floor gesetzt
+          newVolumes[settings.bars - 1] = MIN_AMPLITUDE_FLOOR;
+
+          return newVolumes;
       });
 
       // 4. Aktuellen dB-Wert aktualisieren
       setCurrentDb(currentSmoothedDb.current);
+      
     }, 50);
-
+    
     return () => {
       clearInterval(intervalId);
     };
-  }, []);
+  }, []); 
 
   // Funktion zum Rendern der Balken basierend auf dem State
   const renderVisualizerBars = () => {
@@ -271,8 +276,8 @@ const Meter = () => {
             borderRadius: "0",
             // Skalierung des Balkens (Höhe) direkt über den State-Wert
             transform: `scaleY(${barVolume / MAX_AMPLITUDE})`,
-            // Leichte Transition für weichere Übergänge (hilft bei Live-Balken)
-            transition: "transform 0.05s linear",
+            // Wir behalten die Transition, da sie die Bewegung der Live-Balken weicher macht
+            transition: 'transform 0.05s linear'
           }}
         />
       );
@@ -340,7 +345,7 @@ const Meter = () => {
         {isLoud && (
           <div className="alarm-message">⚠️ ZU LAUT! KLASSE ENTDECKT! ⚠️</div>
         )}
-        {renderVisualizerBars()}
+        {renderVisualizerBars()} 
       </div>
     </div>
   );
