@@ -224,26 +224,29 @@ const Meter = () => {
     return amplitudeToDb(warningThreshold);
   }, [warningThreshold]);
 
-  // Intervall zur Aktualisierung der ANZEIGE (unverändert)
   useEffect(() => {
+    // Intervall (50ms) zur Aktualisierung der ANZEIGE
     const intervalId = setInterval(() => {
-      volumeRefs.current.unshift(volume.current);
-      volumeRefs.current.pop();
+      // 1. HORIZONTALE VERSCHIEBUNG ENTFERNT
+      // volumeRefs.current.unshift(volume.current);
+      // volumeRefs.current.pop();
 
+      // 2. UI-Update
       setCurrentDb(currentSmoothedDb.current);
 
       const thresholdDb = getThresholdDb();
+      const currentRms = volume.current; // Den aktuellen RMS-Wert einmal abrufen
+      const isLoud = amplitudeToDb(currentRms) >= thresholdDb; // Gesamtfarbe bestimmen
+
       for (let i = 0; i < refs.current.length; i++) {
         if (refs.current[i]) {
-          const barVolume = volumeRefs.current[i];
-          const isBarLoud = amplitudeToDb(barVolume) >= thresholdDb;
-
-          // Skalierung mit dem neuen MAX_AMPLITUDE Wert
+          // NEU: Alle Balken zeigen den GLEICHEN, aktuellen Wert
           refs.current[i].style.transform = `scaleY(${
-            barVolume / MAX_AMPLITUDE
+            currentRms / MAX_AMPLITUDE
           })`;
 
-          refs.current[i].style.background = isBarLoud
+          // NEU: Alle Balken haben dieselbe Farbe basierend auf dem Schwellenwert
+          refs.current[i].style.background = isLoud
             ? "rgb(255, 99, 71)"
             : "#00bfa5";
         }
@@ -269,11 +272,9 @@ const Meter = () => {
             background: "#00bfa5",
             minWidth: settings.width + "px",
             flexGrow: 1,
-            // ANPASSUNG: Höhe des Containers füllen
-            height: "100%", // NEU: Nimmt die volle Höhe des übergeordneten Containers ein
+            height: settings.height + "px",
             transformOrigin: "bottom",
             margin: "0 1px",
-            // Stellt sicher, dass die Balken unten ausgerichtet sind
             alignSelf: "flex-end",
             borderRadius: "0",
           }}
@@ -335,14 +336,10 @@ const Meter = () => {
         </p>
       </div>
 
-      {/* Hier wird die Höhe des Visualizers festgelegt */}
       <div
         className="meter-visualizer"
         style={{
           height: settings.height + "px",
-          // WICHTIG: Sicherstellen, dass der Container Flex-Elemente am Ende ausrichtet (falls es nicht schon in styles.css ist)
-          display: "flex",
-          alignItems: "flex-end", // NEU/KORREKT: Stellt sicher, dass die Basis der Balken fixiert ist
         }}
       >
         {isLoud && (
