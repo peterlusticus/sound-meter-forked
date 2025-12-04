@@ -41,7 +41,6 @@ const amplitudeToDb = (rms) => {
   // 2. Logarithmische Berechnung der Dezibel (20 * log10(A/A_ref))
   // Dies gibt einen negativen Wert relativ zur Vollaussteuerung (dBFS).
   // Durch das Addieren von MAX_DB kalibrieren wir es auf die dBSPL-Skala (z.B. 0dBFS -> 90dBSPL).
-  // Wir subtrahieren einen kleinen Betrag, um den MAX_DB-Wert bei voller Lautstärke genauer zu treffen.
   let db = 20 * Math.log10(normalizedRms) + MAX_DB;
 
   // Begrenze den Wert auf den definierten Maximal- und Minimalwert
@@ -70,9 +69,19 @@ const Meter = () => {
   const [isLoud, setIsLoud] = useState(false);
   const [currentDb, setCurrentDb] = useState(0.0);
 
-  const refs = useRef([]);
+  // NEU: State für die Visualisierung der Balken. Löst Re-Render aus.
+  const [barVolumes, setBarVolumes] = useState(
+    new Array(settings.bars).fill(0)
+  );
+
+  // refs ist nicht mehr nötig, da wir State verwenden.
+  // const refs = useRef([]);
+
   // volume.current speichert jetzt den aktuellen RMS-Wert (0-128)
   const volume = useRef(0);
+
+  // volumeRefs bleibt ein Ref, um das Array im Intervall (50ms) zu verschieben,
+  // bevor es in den State übergeben wird.
   const volumeRefs = useRef(new Array(settings.bars).fill(0));
 
   const currentSmoothedDb = useRef(0.0);
@@ -142,7 +151,8 @@ const Meter = () => {
         // Wir brauchen den ScriptProcessor nicht wirklich, aber er funktioniert für die Schleife
         const javascriptNode = audioContext.createScriptProcessor(2048, 1, 1);
 
-        analyser.smoothingTimeConstant = 0.75;
+        // ERHÖHT: Glättung für ruhigere Bewegung
+        analyser.smoothingTimeConstant = 0.85;
         // Für RMS im Zeitbereich muss die fftSize nicht groß sein, aber 1024 ist okay
         analyser.fftSize = 1024;
 
@@ -224,61 +234,44 @@ const Meter = () => {
     return amplitudeToDb(warningThreshold);
   }, [warningThreshold]);
 
+  // NEUER EFFEKT: Datenverschiebung und State-Update
   useEffect(() => {
     // Intervall (50ms) zur Aktualisierung der ANZEIGE
     const intervalId = setInterval(() => {
       // 1. Horizontale Verschiebung der Daten
-      volumeRefs.current.unshift(volume.current); // Fügt den NEUESTEN RMS-Wert vorne ein
-      volumeRefs.current.pop(); // Entfernt den ÄLTESTEN Wert hinten
+      // Erzeuge eine Kopie des Ref-Arrays, um es zu verschieben
+      const newVolumes = [...volumeRefs.current];
+      newVolumes.unshift(volume.current); // Fügt den NEUESTEN RMS-Wert vorne ein
+      newVolumes.pop(); // Entfernt den ÄLTESTEN Wert hinten
 
-      // 2. UI-Update
+      // 2. Ref und State aktualisieren
+      volumeRefs.current = newVolumes; // Ref für nächste Iteration speichern
+      setBarVolumes(newVolumes); // State für Re-Rendering aktualisieren
+
+      // 3. Aktuellen dB-Wert aktualisieren
       setCurrentDb(currentSmoothedDb.current);
-
-      const thresholdDb = getThresholdDb();
-
-      // NEU: Die Schleife weist jedem Balken den entsprechenden, verschobenen Wert zu
-      for (let i = 0; i < refs.current.length; i++) {
-        if (refs.current[i]) {
-          // barVolume ist der Wert an der Position i im verschobenen Array
-          const barVolume = volumeRefs.current[i];
-
-          // NEU: Berechnung der Farbe und Höhe auf Basis des historischen Wertes
-          const isBarLoud = amplitudeToDb(barVolume) >= thresholdDb;
-
-          // Skalierung des Balkens (Höhe)
-          refs.current[i].style.transform = `scaleY(${
-            barVolume / MAX_AMPLITUDE
-          })`;
-
-          // Färbung des Balkens
-          refs.current[i].style.background = isBarLoud
-            ? "rgb(255, 99, 71)"
-            : "#00bfa5";
-
-          // ZUSÄTZLICHE GLÄTTUNG (Optional):
-          // Um das Zucken noch weiter zu minimieren, können Sie die SmoothingTimeConstant
-          // des AnalyserNode in der getMedia Funktion erhöhen (z.B. von 0.75 auf 0.85 oder 0.9).
-        }
-      }
     }, 50);
+
     return () => {
       clearInterval(intervalId);
     };
-  }, [getThresholdDb]);
+  }, []); // Keine Abhängigkeiten (außer initialer Aufruf)
 
-  const createElements = () => {
-    let elements = [];
-    for (let i = 0; i < settings.bars; i++) {
-      elements.push(
+  // NEU: Funktion zum Rendern der Balken basierend auf dem State
+  const renderVisualizerBars = () => {
+    const thresholdDb = getThresholdDb();
+
+    // Wir iterieren über den State (barVolumes)
+    return barVolumes.map((barVolume, i) => {
+      // Berechnung von Farbe und Höhe auf Basis des historischen State-Wertes
+      const isBarLoud = amplitudeToDb(barVolume) >= thresholdDb;
+      const barColor = isBarLoud ? "rgb(255, 99, 71)" : "#00bfa5";
+
+      return (
         <div
-          ref={(ref) => {
-            if (ref && !refs.current.includes(ref)) {
-              refs.current.push(ref);
-            }
-          }}
           key={`vu-${i}`}
           style={{
-            background: "#00bfa5",
+            background: barColor,
             minWidth: settings.width + "px",
             flexGrow: 1,
             height: settings.height + "px",
@@ -286,12 +279,18 @@ const Meter = () => {
             margin: "0 1px",
             alignSelf: "flex-end",
             borderRadius: "0",
+            // Skalierung des Balkens (Höhe) direkt über den State-Wert
+            transform: `scaleY(${barVolume / MAX_AMPLITUDE})`,
+            // Hinzufügen einer leichten Transition für weichere Übergänge
+            transition: "transform 0.05s ease-out",
           }}
         />
       );
-    }
-    return elements;
+    });
   };
+
+  // Die alte createElements Funktion ist nun unnötig, da wir State verwenden.
+  // const createElements = () => { /* ... */ };
 
   const handleDbInputChange = (e) => {
     const value = e.target.value;
@@ -354,7 +353,8 @@ const Meter = () => {
         {isLoud && (
           <div className="alarm-message">⚠️ ZU LAUT! KLASSE ENTDECKT! ⚠️</div>
         )}
-        {createElements()}
+        {renderVisualizerBars()}{" "}
+        {/* NEU: Aufruf der State-basierten Renderfunktion */}
       </div>
     </div>
   );
