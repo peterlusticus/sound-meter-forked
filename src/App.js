@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState, useCallback } from "react";
+// Importieren Sie das Stylesheet für die Ästhetik
 import "./styles.css";
 
 // --- KONSTANTEN UND EINSTELLUNGEN ---
@@ -8,6 +9,10 @@ const settings = {
   width: 10,
   height: 200,
 };
+
+// NEUE KONSTANTEN FÜR DIE VISUALISIERUNG
+const METER_DECAY_FACTOR = 0.96; // Faktor für den langsamen Zerfall des historischen Spuren
+const LIVE_BAR_COUNT = 3; // Die ersten 3 Balken zeigen den Live-Wert (kein Zerfall)
 
 // Verwenden Sie eine URL, die lokal oder im Browser verfügbar ist
 const AIRHORN_SOUND_URL = "/airhorn.mp3";
@@ -28,39 +33,26 @@ const ALARM_DURATION_MS = 2000;
 
 // --- HILFSFUNKTIONEN ---
 
-// NEUE HILFSFUNKTION: Konvertiert RMS-Amplitude (0-128) zu dB (dBFS-ähnlich)
+// Konvertiert RMS-Amplitude (0-128) zu dB (dBFS-ähnlich)
 const amplitudeToDb = (rms) => {
-  // Wenn der RMS-Wert nahe dem Ruhewert ist (Stille), gib den Rauschpegel zurück.
   if (rms < MIN_AMPLITUDE_FLOOR) {
     return MIN_DB_FLOOR;
   }
-
-  // 1. Normalisiere den RMS-Wert (relativ zur maximalen Amplitude 128)
   const normalizedRms = rms / MAX_AMPLITUDE;
-
-  // 2. Logarithmische Berechnung der Dezibel (20 * log10(A/A_ref))
-  // Dies gibt einen negativen Wert relativ zur Vollaussteuerung (dBFS).
-  // Durch das Addieren von MAX_DB kalibrieren wir es auf die dBSPL-Skala (z.B. 0dBFS -> 90dBSPL).
   let db = 20 * Math.log10(normalizedRms) + MAX_DB;
-
-  // Begrenze den Wert auf den definierten Maximal- und Minimalwert
   return Math.min(MAX_DB, Math.max(MIN_DB_FLOOR, db));
 };
 
-// NEUE HILFSFUNKTION: Konvertiert dB zu RMS-Amplitude (0-128) für den Schwellenwert
+// Konvertiert dB zu RMS-Amplitude (0-128) für den Schwellenwert
 const dbToRms = (db) => {
-  // Stellt sicher, dass dB nicht unter dem Grundrauschpegel liegt
   if (db <= MIN_DB_FLOOR) return MIN_AMPLITUDE_FLOOR;
-
-  // Reziproke exponentielle Formel: A = A_ref * 10^((dB - dB_ref) / 20)
   let rms = MAX_AMPLITUDE * Math.pow(10, (db - MAX_DB) / 20);
-
   return Math.min(MAX_AMPLITUDE, Math.max(MIN_AMPLITUDE_FLOOR, rms));
 };
 
 const Meter = () => {
   const [warningThreshold, setWarningThreshold] = useState(
-    dbToRms(INITIAL_WARNING_DB) // threshold ist jetzt RMS-Wert (0-128)
+    dbToRms(INITIAL_WARNING_DB)
   );
   const [warningDbInput, setWarningDbInput] = useState(
     INITIAL_WARNING_DB.toFixed(0)
@@ -69,20 +61,13 @@ const Meter = () => {
   const [isLoud, setIsLoud] = useState(false);
   const [currentDb, setCurrentDb] = useState(0.0);
 
-  // NEU: State für die Visualisierung der Balken. Löst Re-Render aus.
+  // State für die Visualisierung der Balken (RMS-Werte), jetzt mit Zerfall
   const [barVolumes, setBarVolumes] = useState(
     new Array(settings.bars).fill(0)
   );
 
-  // refs ist nicht mehr nötig, da wir State verwenden.
-  // const refs = useRef([]);
-
-  // volume.current speichert jetzt den aktuellen RMS-Wert (0-128)
+  // volume.current speichert den aktuellen RMS-Wert (0-128) vom Audio-Thread
   const volume = useRef(0);
-
-  // volumeRefs bleibt ein Ref, um das Array im Intervall (50ms) zu verschieben,
-  // bevor es in den State übergeben wird.
-  const volumeRefs = useRef(new Array(settings.bars).fill(0));
 
   const currentSmoothedDb = useRef(0.0);
   const loudnessDuration = useRef(0);
@@ -148,41 +133,31 @@ const Meter = () => {
         audioContext = new AudioContext();
         const analyser = audioContext.createAnalyser();
         const microphone = audioContext.createMediaStreamSource(stream);
-        // Wir brauchen den ScriptProcessor nicht wirklich, aber er funktioniert für die Schleife
         const javascriptNode = audioContext.createScriptProcessor(2048, 1, 1);
 
         // ERHÖHT: Glättung für ruhigere Bewegung
         analyser.smoothingTimeConstant = 0.85;
-        // Für RMS im Zeitbereich muss die fftSize nicht groß sein, aber 1024 ist okay
         analyser.fftSize = 1024;
 
         microphone.connect(analyser);
         analyser.connect(javascriptNode);
         javascriptNode.connect(audioContext.destination);
 
-        // Array für die Amplitudendaten (Zeitbereich)
         const dataArray = new Uint8Array(analyser.fftSize);
 
         javascriptNode.onaudioprocess = () => {
-          // NEU: GetByteTimeDomainData für Amplituden-Messung
           analyser.getByteTimeDomainData(dataArray);
 
           let sumOfSquares = 0;
 
-          // NEU: Berechnung des RMS-Wertes
           for (let i = 0; i < dataArray.length; i++) {
-            // Zentrierung der Werte um den Ruhewert 128 (0-255)
             const amplitude = dataArray[i] - 128;
             sumOfSquares += amplitude * amplitude;
           }
 
-          // Root Mean Square (RMS) berechnen: sqrt(Summe der Quadrate / Anzahl der Samples)
           const rms = Math.sqrt(sumOfSquares / dataArray.length);
-
-          // Der aktuelle RMS-Wert (0-128)
           volume.current = rms;
 
-          // Konvertierung des RMS-Wertes in dB
           const db = amplitudeToDb(rms);
           currentSmoothedDb.current = db;
 
@@ -194,10 +169,8 @@ const Meter = () => {
 
           // Alarm-Logik (unverändert)
           if (!alarmTriggered.current) {
-            // Vergleich mit dem RMS-Wert (0-128)
             if (rms >= volumeThreshold) {
               loudnessDuration.current += delta;
-
               if (loudnessDuration.current >= ALARM_DELAY_MS) {
                 setWarning();
                 loudnessDuration.current = 0;
@@ -214,7 +187,6 @@ const Meter = () => {
 
     return () => {
       if (audioContext && audioContext.state !== "closed") {
-        // stream.getTracks().forEach(track => track.stop()); // Stream stoppen für sauberen Abbau
         audioContext
           .close()
           .catch((e) =>
@@ -229,35 +201,53 @@ const Meter = () => {
     return cleanup;
   }, [getMedia]);
 
-  // Funktion zur Anzeige (verwendet die neue RMS -> dB Funktion)
+  // Funktion zur Anzeige
   const getThresholdDb = useCallback(() => {
     return amplitudeToDb(warningThreshold);
   }, [warningThreshold]);
 
-  // NEUER EFFEKT: Datenverschiebung und State-Update
+  // EFFEKT: Datenverschiebung, Zerfall und State-Update (löst das "Zittern")
   useEffect(() => {
     // Intervall (50ms) zur Aktualisierung der ANZEIGE
     const intervalId = setInterval(() => {
-      // 1. Horizontale Verschiebung der Daten
-      // Erzeuge eine Kopie des Ref-Arrays, um es zu verschieben
-      const newVolumes = [...volumeRefs.current];
-      newVolumes.unshift(volume.current); // Fügt den NEUESTEN RMS-Wert vorne ein
-      newVolumes.pop(); // Entfernt den ÄLTESTEN Wert hinten
+      // 1. Aktuellen Live-RMS-Wert holen
+      const currentRms = volume.current;
 
-      // 2. Ref und State aktualisieren
-      volumeRefs.current = newVolumes; // Ref für nächste Iteration speichern
-      setBarVolumes(newVolumes); // State für Re-Rendering aktualisieren
+      // Wir erstellen eine Kopie des aktuellen Visualisierungs-States, um es zu manipulieren
+      setBarVolumes((prevVolumes) => {
+        const newVolumes = [...prevVolumes];
 
-      // 3. Aktuellen dB-Wert aktualisieren
+        // 2. Datenverschiebung (Shiften)
+        // Füge den NEUESTEN Live-Wert vorne an
+        newVolumes.unshift(currentRms);
+        // Entferne den ÄLTESTEN Wert hinten
+        newVolumes.pop();
+
+        // 3. Peak-Hold- und Decay-Logik für die historische Spur
+        for (let i = LIVE_BAR_COUNT; i < settings.bars; i++) {
+          // Wende den Zerfall nur auf die historische Spur an (ab Index LIVE_BAR_COUNT)
+          // Da der Wert jetzt langsam zerfällt (statt zu springen), wird das Zittern beseitigt.
+          newVolumes[i] = newVolumes[i] * METER_DECAY_FACTOR;
+
+          // Stelle sicher, dass der Wert nicht unter den Grundrauschpegel fällt
+          if (newVolumes[i] < MIN_AMPLITUDE_FLOOR) {
+            newVolumes[i] = MIN_AMPLITUDE_FLOOR;
+          }
+        }
+
+        return newVolumes;
+      });
+
+      // 4. Aktuellen dB-Wert aktualisieren
       setCurrentDb(currentSmoothedDb.current);
     }, 50);
 
     return () => {
       clearInterval(intervalId);
     };
-  }, []); // Keine Abhängigkeiten (außer initialer Aufruf)
+  }, []);
 
-  // NEU: Funktion zum Rendern der Balken basierend auf dem State
+  // Funktion zum Rendern der Balken basierend auf dem State
   const renderVisualizerBars = () => {
     const thresholdDb = getThresholdDb();
 
@@ -281,16 +271,13 @@ const Meter = () => {
             borderRadius: "0",
             // Skalierung des Balkens (Höhe) direkt über den State-Wert
             transform: `scaleY(${barVolume / MAX_AMPLITUDE})`,
-            // Hinzufügen einer leichten Transition für weichere Übergänge
-            transition: "transform 0.05s ease-out",
+            // Leichte Transition für weichere Übergänge (hilft bei Live-Balken)
+            transition: "transform 0.05s linear",
           }}
         />
       );
     });
   };
-
-  // Die alte createElements Funktion ist nun unnötig, da wir State verwenden.
-  // const createElements = () => { /* ... */ };
 
   const handleDbInputChange = (e) => {
     const value = e.target.value;
@@ -353,8 +340,7 @@ const Meter = () => {
         {isLoud && (
           <div className="alarm-message">⚠️ ZU LAUT! KLASSE ENTDECKT! ⚠️</div>
         )}
-        {renderVisualizerBars()}{" "}
-        {/* NEU: Aufruf der State-basierten Renderfunktion */}
+        {renderVisualizerBars()}
       </div>
     </div>
   );
