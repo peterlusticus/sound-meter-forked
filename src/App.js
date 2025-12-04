@@ -5,8 +5,8 @@ import "./styles.css";
 // --- KONSTANTEN UND EINSTELLUNGEN ---
 
 const settings = {
-  bars: 1, // NUR NOCH EIN BALKEN FÜR DEN VU-METER
-  width: 50, // Breite des einzelnen Balkens
+  bars: 10, // ZURÜCK AUF MEHRERE BALKEN für eine breitere Anzeige
+  width: 20, // Breite der einzelnen Balken angepasst
   height: 200,
 };
 
@@ -57,7 +57,7 @@ const Meter = () => {
   const [isLoud, setIsLoud] = useState(false);
   const [currentDb, setCurrentDb] = useState(0.0);
 
-  // State für die Visualisierung der Balken (RMS-Werte) - Enthält nur noch einen Wert
+  // State für die Visualisierung der Balken (RMS-Werte) - Enthält 10 identische Werte
   const [barVolumes, setBarVolumes] = useState(
     new Array(settings.bars).fill(0)
   );
@@ -202,15 +202,16 @@ const Meter = () => {
     return amplitudeToDb(warningThreshold);
   }, [warningThreshold]);
 
-  // EFFEKT: Datenaktualisierung für den Einzelbalken
+  // EFFEKT: Datenaktualisierung für den Multi-Balken VU-Meter
   useEffect(() => {
     // Intervall (50ms) zur Aktualisierung der ANZEIGE
     const intervalId = setInterval(() => {
       const currentRms = volume.current;
 
       setBarVolumes(() => {
-        // Setze den Zustand auf einen Array mit dem aktuellen RMS-Wert
-        return [currentRms];
+        // Erzeugt ein neues Array, in dem JEDER BALKEN den GLEICHEN aktuellen RMS-Wert enthält.
+        // Dadurch gibt es keine horizontale Verschiebung/Zittern mehr.
+        return new Array(settings.bars).fill(currentRms);
       });
 
       // 4. Aktuellen dB-Wert aktualisieren
@@ -222,34 +223,38 @@ const Meter = () => {
     };
   }, []);
 
-  // Funktion zum Rendern des einzelnen Balkens
+  // Funktion zum Rendern der Balken basierend auf dem State
   const renderVisualizerBars = () => {
     const thresholdDb = getThresholdDb();
 
-    // Wir verwenden nur den ersten (und einzigen) Wert im State
-    const barVolume = barVolumes[0] || MIN_AMPLITUDE_FLOOR;
+    // Wir iterieren über den State (barVolumes)
+    return barVolumes.map((barVolume, i) => {
+      // Stellt sicher, dass der minimale Wert nicht Null ist (verhindert, dass der Balken verschwindet)
+      const safeBarVolume = Math.max(barVolume, MIN_AMPLITUDE_FLOOR);
 
-    // Berechnung von Farbe und Höhe auf Basis des State-Wertes
-    const isBarLoud = amplitudeToDb(barVolume) >= thresholdDb;
-    const barColor = isBarLoud ? "rgb(255, 99, 71)" : "#00bfa5";
+      // Berechnung von Farbe und Höhe auf Basis des State-Wertes
+      const isBarLoud = amplitudeToDb(safeBarVolume) >= thresholdDb;
+      const barColor = isBarLoud ? "rgb(255, 99, 71)" : "#00bfa5";
 
-    return (
-      <div
-        key={`vu-0`}
-        style={{
-          background: barColor,
-          width: settings.width + "px",
-          height: settings.height + "px",
-          transformOrigin: "bottom",
-          alignSelf: "flex-end",
-          borderRadius: "0",
-          // Skalierung des Balkens (Höhe) direkt über den State-Wert
-          transform: `scaleY(${barVolume / MAX_AMPLITUDE})`,
-          // Beibehaltung der Transition für weiche Bewegung
-          transition: "transform 0.05s linear",
-        }}
-      />
-    );
+      return (
+        <div
+          key={`vu-${i}`}
+          style={{
+            background: barColor,
+            width: settings.width + "px",
+            height: settings.height + "px",
+            transformOrigin: "bottom",
+            alignSelf: "flex-end", // Lässt den Balken von unten nach oben wachsen
+            margin: "0 1px", // Kleiner Abstand zwischen den Balken
+            borderRadius: "0",
+            // Skalierung der Höhe (Alle Balken zeigen den gleichen Wert)
+            transform: `scaleY(${safeBarVolume / MAX_AMPLITUDE})`,
+            // Beibehaltung der Transition für weiche Bewegung
+            transition: "transform 0.05s linear",
+          }}
+        />
+      );
+    });
   };
 
   const handleDbInputChange = (e) => {
@@ -308,10 +313,11 @@ const Meter = () => {
         className="meter-visualizer"
         style={{
           height: settings.height + "px",
-          // NEU: Flex-Container für die Zentrierung des Einzelbalkens
+          // Flex-Container für die nebeneinander liegenden Balken
           display: "flex",
           justifyContent: "center",
-          alignItems: "flex-end", // Balken wächst von unten nach oben
+          alignItems: "flex-end", // Balken wachsen von unten nach oben
+          padding: "0 10px", // Etwas Rand
         }}
       >
         {isLoud && (
