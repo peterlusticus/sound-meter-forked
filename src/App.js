@@ -1,60 +1,67 @@
 import React, { useEffect, useRef, useState, useCallback } from "react";
 import "./styles.css";
 
+// --- KONSTANTEN UND EINSTELLUNGEN ---
+
 const settings = {
   bars: 30,
   width: 10,
   height: 200,
 };
 
+// Verwenden Sie eine URL, die lokal oder im Browser verfügbar ist
 const AIRHORN_SOUND_URL = "/airhorn.mp3";
 
-// Verzögerung: Mindestdauer der Lautstärkeüberschreitung, bevor der Alarm ausgelöst wird (gegen "Klakser")
-const ALARM_DELAY_MS = 50;
-// Feste Dauer des Alarms (2000ms = 2 Sekunden)
-const ALARM_DURATION_MS = 2000;
+// Konstanten für die Lautstärkeskala (getByteTimeDomainData liefert 0-255)
+// Ruhewert (kein Ton) ist 128. Maximale Amplitude = 127
+const MAX_AMPLITUDE = 128;
+const MIN_AMPLITUDE_FLOOR = 2; // Minimaler Wert für die RMS-Berechnung
 
-// Konstanten für die Lautstärkeskala
-const MAX_ANALYZER_VALUE = 255;
-const MIN_THRESHOLD = 1;
-
-// Konstanten für die dB-Skala
-// AUF 90 dB gesetzt, um genügend Headroom für laute Geräusche zu haben
-const MAX_DB = 90;
-const MIN_DB_FLOOR = 30; // Realistischer Grundrauschpegel (z.B. ruhiger Raum)
+// Konstanten für die dB-Skala (dB-Kalibrierung)
+const MAX_DB = 90; // Entspricht ungefähr der maximalen Amplitude (127)
+const MIN_DB_FLOOR = 30; // Realistischer Grundrauschpegel
 const INITIAL_WARNING_DB = 75;
 
-// Hilfsfunktion: Konvertiert Volumen (0-255) zu dB (0-MAX_DB)
-const volumeToDb = (volume) => {
-  const normalizedVolume = volume / MAX_ANALYZER_VALUE;
+// Alarm-Logik
+const ALARM_DELAY_MS = 50;
+const ALARM_DURATION_MS = 2000;
 
-  // Setzt einen realistischen Grundrauschpegel für absolute Stille
-  if (volume <= MIN_THRESHOLD) {
+// --- HILFSFUNKTIONEN ---
+
+// NEUE HILFSFUNKTION: Konvertiert RMS-Amplitude (0-128) zu dB (dBFS-ähnlich)
+const amplitudeToDb = (rms) => {
+  // Wenn der RMS-Wert nahe dem Ruhewert ist (Stille), gib den Rauschpegel zurück.
+  if (rms < MIN_AMPLITUDE_FLOOR) {
     return MIN_DB_FLOOR;
   }
 
-  // Logarithmische Berechnung der Dezibel (20 * log10(A/A_ref) + dB_ref)
-  // 20*log10 wird für Amplitudenwerte verwendet.
-  let db = 20 * Math.log10(normalizedVolume) + MAX_DB;
+  // 1. Normalisiere den RMS-Wert (relativ zur maximalen Amplitude 128)
+  const normalizedRms = rms / MAX_AMPLITUDE;
 
-  // Max-Wert ist MAX_DB, Minimum wird auf den Grundrauschpegel gesetzt.
+  // 2. Logarithmische Berechnung der Dezibel (20 * log10(A/A_ref))
+  // Dies gibt einen negativen Wert relativ zur Vollaussteuerung (dBFS).
+  // Durch das Addieren von MAX_DB kalibrieren wir es auf die dBSPL-Skala (z.B. 0dBFS -> 90dBSPL).
+  // Wir subtrahieren einen kleinen Betrag, um den MAX_DB-Wert bei voller Lautstärke genauer zu treffen.
+  let db = 20 * Math.log10(normalizedRms) + MAX_DB;
+
+  // Begrenze den Wert auf den definierten Maximal- und Minimalwert
   return Math.min(MAX_DB, Math.max(MIN_DB_FLOOR, db));
 };
 
-// Hilfsfunktion: Konvertiert dB (MIN_DB_FLOOR-MAX_DB) zu Volumen (0-255)
-const dbToVolume = (db) => {
+// NEUE HILFSFUNKTION: Konvertiert dB zu RMS-Amplitude (0-128) für den Schwellenwert
+const dbToRms = (db) => {
   // Stellt sicher, dass dB nicht unter dem Grundrauschpegel liegt
-  if (db <= MIN_DB_FLOOR) return MIN_THRESHOLD;
+  if (db <= MIN_DB_FLOOR) return MIN_AMPLITUDE_FLOOR;
 
-  // Reziproke exponentielle Formel zur Umwandlung von dB in Volumen
-  let volume = MAX_ANALYZER_VALUE * Math.pow(10, (db - MAX_DB) / 20);
+  // Reziproke exponentielle Formel: A = A_ref * 10^((dB - dB_ref) / 20)
+  let rms = MAX_AMPLITUDE * Math.pow(10, (db - MAX_DB) / 20);
 
-  return Math.min(MAX_ANALYZER_VALUE, Math.max(MIN_THRESHOLD, volume));
+  return Math.min(MAX_AMPLITUDE, Math.max(MIN_AMPLITUDE_FLOOR, rms));
 };
 
 const Meter = () => {
   const [warningThreshold, setWarningThreshold] = useState(
-    dbToVolume(INITIAL_WARNING_DB)
+    dbToRms(INITIAL_WARNING_DB) // threshold ist jetzt RMS-Wert (0-128)
   );
   const [warningDbInput, setWarningDbInput] = useState(
     INITIAL_WARNING_DB.toFixed(0)
@@ -64,6 +71,7 @@ const Meter = () => {
   const [currentDb, setCurrentDb] = useState(0.0);
 
   const refs = useRef([]);
+  // volume.current speichert jetzt den aktuellen RMS-Wert (0-128)
   const volume = useRef(0);
   const volumeRefs = useRef(new Array(settings.bars).fill(0));
 
@@ -72,54 +80,41 @@ const Meter = () => {
   const lastTimeCheck = useRef(performance.now());
 
   const airhorn = useRef(null);
-  // alarmTriggered.current: Steuert, ob gerade ein Alarmzyklus (2s) aktiv ist
   const alarmTriggered = useRef(false);
-  // Ref für den 2-Sekunden-Timer
   const alarmTimeoutRef = useRef(null);
 
-  // Ref, um den aktuellen Lautstärke-Grenzwert an die Audio-Schleife zu übergeben.
-  const currentVolumeThresholdRef = useRef(dbToVolume(INITIAL_WARNING_DB));
+  // Ref für den aktuellen RMS-Schwellenwert
+  const currentVolumeThresholdRef = useRef(dbToRms(INITIAL_WARNING_DB));
 
-  // Synchronisiert den State mit dem Ref, wann immer der State sich ändert
+  // Synchronisiert den State (RMS-Wert) mit dem Ref
   useEffect(() => {
     currentVolumeThresholdRef.current = warningThreshold;
   }, [warningThreshold]);
 
   useEffect(() => {
-    // Stellen Sie sicher, dass Sie eine lokale oder im Browser verfügbare Audioquelle verwenden.
-    // Dieser Ton wird beim Start geladen.
     airhorn.current = new Audio(AIRHORN_SOUND_URL);
     airhorn.current.loop = false;
   }, []);
 
-  // Funktion zum Beenden des Alarms nach der festgelegten Dauer
+  // --- ALARM-LOGIK ---
+
   const resetAlarm = useCallback(() => {
-    // 1. UI zurücksetzen
     setIsLoud(false);
-    // 2. Ton stoppen
     if (airhorn.current) {
       airhorn.current.pause();
       airhorn.current.currentTime = 0;
     }
-    // 3. Alarm-Zyklus freigeben, damit ein neuer ausgelöst werden kann
     alarmTriggered.current = false;
-
-    // Timer aufräumen
     if (alarmTimeoutRef.current) {
       clearTimeout(alarmTimeoutRef.current);
       alarmTimeoutRef.current = null;
     }
   }, []);
 
-  // setWarning startet jetzt NUR den 2-Sekunden-Zyklus
   const setWarning = useCallback(() => {
-    // Wenn der Alarm bereits läuft, beenden wir hier
     if (alarmTriggered.current) return;
 
-    // 1. Alarm-Zyklus starten
     alarmTriggered.current = true;
-
-    // 2. UI und Ton starten
     setIsLoud(true);
     if (airhorn.current) {
       airhorn.current.currentTime = 0;
@@ -128,70 +123,76 @@ const Meter = () => {
         .catch((e) => console.error("Fehler beim Abspielen des Tons:", e));
     }
 
-    // 3. Timer setzen, der den Alarm nach ALARM_DURATION_MS beendet
     alarmTimeoutRef.current = setTimeout(() => {
       resetAlarm();
     }, ALARM_DURATION_MS);
   }, [resetAlarm]);
 
+  // --- AUDIO-VERARBEITUNG ---
+
   const getMedia = useCallback(() => {
-    // audioContext muss im Scope von getMedia deklariert werden,
-    // damit die Cleanup-Funktion am Ende darauf zugreifen kann.
     let audioContext;
 
     navigator.mediaDevices
       .getUserMedia({ audio: true })
       .then((stream) => {
-        audioContext = new AudioContext(); // Zuweisung hier
+        audioContext = new AudioContext();
         const analyser = audioContext.createAnalyser();
         const microphone = audioContext.createMediaStreamSource(stream);
+        // Wir brauchen den ScriptProcessor nicht wirklich, aber er funktioniert für die Schleife
         const javascriptNode = audioContext.createScriptProcessor(2048, 1, 1);
 
         analyser.smoothingTimeConstant = 0.75;
+        // Für RMS im Zeitbereich muss die fftSize nicht groß sein, aber 1024 ist okay
         analyser.fftSize = 1024;
 
         microphone.connect(analyser);
         analyser.connect(javascriptNode);
         javascriptNode.connect(audioContext.destination);
 
-        javascriptNode.onaudioprocess = () => {
-          var array = new Uint8Array(analyser.frequencyBinCount);
-          analyser.getByteFrequencyData(array);
-          var values = 0;
-          var length = array.length;
+        // Array für die Amplitudendaten (Zeitbereich)
+        const dataArray = new Uint8Array(analyser.fftSize);
 
-          for (var i = 0; i < length; i++) {
-            values += array[i];
+        javascriptNode.onaudioprocess = () => {
+          // NEU: GetByteTimeDomainData für Amplituden-Messung
+          analyser.getByteTimeDomainData(dataArray);
+
+          let sumOfSquares = 0;
+
+          // NEU: Berechnung des RMS-Wertes
+          for (let i = 0; i < dataArray.length; i++) {
+            // Zentrierung der Werte um den Ruhewert 128 (0-255)
+            const amplitude = dataArray[i] - 128;
+            sumOfSquares += amplitude * amplitude;
           }
 
-          const avgVolume = values / length;
-          volume.current = avgVolume; // Der aktuelle Lautstärke-Wert (0-255)
+          // Root Mean Square (RMS) berechnen: sqrt(Summe der Quadrate / Anzahl der Samples)
+          const rms = Math.sqrt(sumOfSquares / dataArray.length);
 
-          const db = volumeToDb(avgVolume);
+          // Der aktuelle RMS-Wert (0-128)
+          volume.current = rms;
+
+          // Konvertierung des RMS-Wertes in dB
+          const db = amplitudeToDb(rms);
           currentSmoothedDb.current = db;
 
-          // Liest den Grenzwert direkt aus dem Ref, der immer aktuell ist.
           const volumeThreshold = currentVolumeThresholdRef.current;
 
           const now = performance.now();
           const delta = now - lastTimeCheck.current;
           lastTimeCheck.current = now;
 
-          // WICHTIG: Die Alarm-Logik darf nur ausgeführt werden,
-          // wenn KEIN Alarm gerade aktiv ist (2-Sekunden-Timer läuft)
+          // Alarm-Logik (unverändert)
           if (!alarmTriggered.current) {
-            // Vergleich mit dem Lautstärke-Wert des Ref (0-255)
-            if (avgVolume >= volumeThreshold) {
-              // Wenn zu laut: Zeit zur Duration hinzufügen
+            // Vergleich mit dem RMS-Wert (0-128)
+            if (rms >= volumeThreshold) {
               loudnessDuration.current += delta;
 
               if (loudnessDuration.current >= ALARM_DELAY_MS) {
-                // Alarm auslösen und 2-Sekunden-Timer starten
                 setWarning();
-                loudnessDuration.current = 0; // Zähler zurücksetzen
+                loudnessDuration.current = 0;
               }
             } else {
-              // Nicht laut genug: Zähler zurücksetzen
               loudnessDuration.current = 0;
             }
           }
@@ -201,10 +202,9 @@ const Meter = () => {
         console.error("Fehler beim Zugriff auf das Mikrofon:", err);
       });
 
-    // Rückgabe einer Funktion, um den AudioContext beim Unmount zu schließen
     return () => {
-      // audioContext ist jetzt im Scope definiert
       if (audioContext && audioContext.state !== "closed") {
+        // stream.getTracks().forEach(track => track.stop()); // Stream stoppen für sauberen Abbau
         audioContext
           .close()
           .catch((e) =>
@@ -212,37 +212,35 @@ const Meter = () => {
           );
       }
     };
-  }, [setWarning]); // Nur setWarning ist jetzt eine Abhängigkeit
+  }, [setWarning]);
 
-  // Ruft getMedia einmal beim Start auf und verwendet die Cleanup-Funktion
   useEffect(() => {
     const cleanup = getMedia();
     return cleanup;
   }, [getMedia]);
 
-  // Wird nur für die Anzeige im UI verwendet
+  // Funktion zur Anzeige (verwendet die neue RMS -> dB Funktion)
   const getThresholdDb = useCallback(() => {
-    return volumeToDb(warningThreshold);
+    return amplitudeToDb(warningThreshold);
   }, [warningThreshold]);
 
+  // Intervall zur Aktualisierung der ANZEIGE (unverändert)
   useEffect(() => {
-    // Intervall (50ms) zur Aktualisierung der ANZEIGE
     const intervalId = setInterval(() => {
       volumeRefs.current.unshift(volume.current);
       volumeRefs.current.pop();
 
-      // Aktualisiert den sichtbaren DB-Wert
       setCurrentDb(currentSmoothedDb.current);
 
       const thresholdDb = getThresholdDb();
       for (let i = 0; i < refs.current.length; i++) {
         if (refs.current[i]) {
           const barVolume = volumeRefs.current[i];
-          // Färbung basiert auf der Lautstärke der einzelnen Balken
-          const isBarLoud = volumeToDb(barVolume) >= thresholdDb;
+          const isBarLoud = amplitudeToDb(barVolume) >= thresholdDb;
 
+          // Skalierung mit dem neuen MAX_AMPLITUDE Wert
           refs.current[i].style.transform = `scaleY(${
-            barVolume / MAX_ANALYZER_VALUE
+            barVolume / MAX_AMPLITUDE
           })`;
 
           refs.current[i].style.background = isBarLoud
@@ -289,17 +287,17 @@ const Meter = () => {
 
     setWarningDbInput(value);
 
-    // WICHTIG: setWarningThreshold wird auch bei ungültigen Eingaben NICHT aktualisiert
-    // Die Max-Grenze ist jetzt 90 dB, Min-Grenze ist 30 dB (Grundrauschpegel).
     if (isNaN(db) || db < MIN_DB_FLOOR || db > MAX_DB) {
       return;
     }
 
-    const newVolumeThreshold = dbToVolume(db);
+    // Wandelt den eingegebenen dB-Wert in den RMS-Schwellenwert um
+    const newVolumeThreshold = dbToRms(db);
     setWarningThreshold(newVolumeThreshold);
   };
 
-  const currentDbThreshold = volumeToDb(warningThreshold).toFixed(1);
+  const currentDbThreshold = amplitudeToDb(warningThreshold).toFixed(1);
+  const currentVolumeValue = volume.current.toFixed(1);
 
   return (
     <div className="meter-container-wrapper">
@@ -311,12 +309,15 @@ const Meter = () => {
           <strong className="current-db">{currentDb.toFixed(1)} dB</strong>
         </div>
 
+        <p className="debug-info">
+          (RMS-Wert: {currentVolumeValue} / {MAX_AMPLITUDE})
+        </p>
+
         <div className="db-input-group">
           <label htmlFor="threshold-db-input">Grenzwert-Schwelle (dB):</label>
           <input
             id="threshold-db-input"
             type="number"
-            // Die Minimum- und Maximum-Werte des Eingabefelds wurden an die neue MAX_DB und den Rauschpegel angepasst.
             min={MIN_DB_FLOOR.toFixed(0)}
             max={MAX_DB.toFixed(0)}
             step="1"
@@ -327,8 +328,8 @@ const Meter = () => {
         </div>
 
         <p className="threshold-info">
-          Warnung ab: <strong>{currentDbThreshold} dB</strong> (Intern:{" "}
-          {warningThreshold.toFixed(0)} Vol)
+          Warnung ab: <strong>{currentDbThreshold} dB</strong> (Intern RMS:{" "}
+          {warningThreshold.toFixed(1)})
         </p>
       </div>
 
