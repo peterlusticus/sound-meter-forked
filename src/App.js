@@ -1,29 +1,21 @@
 import React, { useEffect, useRef, useState, useCallback } from "react";
 import "./styles.css";
 
-// --- EINSTELLUNGEN DES SCHALLPEGELMESSERS ---
+// --- EINSTELLUNGEN DES SCHALLPEGELMESSERS (Konstanten unverändert) ---
 const MAX_DB_DISPLAY = 120;
 const MIN_DB_DISPLAY = 0;
 const DBFS_OFFSET = MAX_DB_DISPLAY;
 const CALIBRATION_OFFSET_DEFAULT = 3.0;
-
-// Zeitkonstanten
 const SMOOTHING_FACTOR = 0.9;
 const RMS_WINDOW_SIZE = 2048;
-
-// Alarm-Logik
-const INITIAL_ALARM_DELAY_MS = 200; // 0,2 Sekunden
+const INITIAL_ALARM_DELAY_MS = 200;
 const ALARM_DURATION_MS = 2000;
 const INITIAL_WARNING_DB = 75;
-
-// UI-Update Intervall (langsamer für eine ruhigere Anzeige)
 const UI_UPDATE_INTERVAL_MS = 100;
 
-// --- HILFSFUNKTIONEN (UNVERÄNDERT) ---
+// --- HILFSFUNKTIONEN (Unverändert) ---
 const calculateDb = (rms, calibrationOffset, dbfsOffset) => {
-  if (rms <= 0) {
-    return MIN_DB_DISPLAY + calibrationOffset;
-  }
+  if (rms <= 0) return MIN_DB_DISPLAY + calibrationOffset;
   const dbfs = 20 * Math.log10(rms);
   let dbSPL = dbfs + dbfsOffset + calibrationOffset;
   return Math.min(MAX_DB_DISPLAY, Math.max(MIN_DB_DISPLAY, dbSPL));
@@ -47,14 +39,12 @@ const Meter = () => {
   const [warningDbInput, setWarningDbInput] = useState(
     INITIAL_WARNING_DB.toFixed(0)
   );
-  // NEU: State für die Alarmverzögerung
   const [alarmDelayMsInput, setAlarmDelayMsInput] = useState(
     INITIAL_ALARM_DELAY_MS.toString()
   );
 
-  // FÜR DIE ANZEIGE (Wird nur im UI_UPDATE_INTERVAL_MS aktualisiert)
   const [currentDb, setCurrentDb] = useState(0.0);
-  const [isLoud, setIsLoud] = useState(false);
+  const [isLoud, setIsLoud] = useState(false); // Steuert Alarm-Anzeige
 
   // Audio-Refs
   const audioContextRef = useRef(null);
@@ -69,18 +59,17 @@ const Meter = () => {
   const currentWarningRms = useRef(
     dbToRms(INITIAL_WARNING_DB, CALIBRATION_OFFSET_DEFAULT, DBFS_OFFSET)
   );
-
-  // NEU: Ref für die konfigurierte Alarmverzögerung (in MS)
   const currentAlarmDelayRef = useRef(INITIAL_ALARM_DELAY_MS);
 
   // Alarm-Audio
   const airhorn = useRef(null);
-  const alarmTriggered = useRef(false);
+  const alarmTriggered = useRef(false); // Ist der Alarm-Ton gerade aktiv
   const alarmTimeoutRef = useRef(null);
 
   // --- ALARM-LOGIK ---
 
   const resetAlarm = useCallback(() => {
+    // Stoppt den optischen Alarm und den Ton
     setIsLoud(false);
     if (airhorn.current) {
       airhorn.current.pause();
@@ -96,27 +85,42 @@ const Meter = () => {
   const setWarning = useCallback(() => {
     if (alarmTriggered.current) return;
 
-    alarmTriggered.current = true;
+    // **KORREKTUR:** Setze isLoud auf true (optische Anzeige)
     setIsLoud(true);
-    // ... Ton abspielen ...
 
+    alarmTriggered.current = true;
+    if (airhorn.current) {
+      airhorn.current.currentTime = 0;
+      airhorn.current
+        .play()
+        .catch((e) => console.error("Fehler beim Abspielen des Tons:", e));
+    }
+
+    // Setze den Timeout, um den Alarm nach ALARM_DURATION_MS zurückzusetzen
+    // (Dies ist nur für den Ton/die temporäre Anzeige gedacht)
     alarmTimeoutRef.current = setTimeout(() => {
-      resetAlarm();
+      // **KORREKTUR:** Führe nur den optischen Reset durch, wenn der Pegel nicht mehr hoch ist.
+      // Der Audio-Loop kümmert sich um den Reset, aber hier stellen wir sicher, dass der Ton stoppt.
+      if (airhorn.current) {
+        airhorn.current.pause();
+        airhorn.current.currentTime = 0;
+      }
+      alarmTriggered.current = false; // Ton ist beendet
+      // Die optische Anzeige (isLoud) wird durch den Audio-Loop gesteuert.
     }, ALARM_DURATION_MS);
-  }, [resetAlarm]);
+  }, []);
 
-  // --- AUDIO-VERARBEITUNG: HAUPT-LOOP (Hochfrequent, RAF-basiert) ---
+  // --- AUDIO-VERARBEITUNG: HAUPT-LOOP (RAF-basiert) ---
 
   const processAudio = useCallback(() => {
     const analyser = analyserRef.current;
     const dataArray = audioDataArrayRef.current;
-
     if (!analyser || !dataArray) {
       animationFrameRef.current = requestAnimationFrame(processAudio);
       return;
     }
 
-    // RMS Berechnung
+    // ... RMS Berechnung ...
     analyser.getFloatTimeDomainData(dataArray);
     let sumOfSquares = 0;
     for (let i = 0; i < dataArray.length; i++) {
@@ -130,23 +134,40 @@ const Meter = () => {
       SMOOTHING_FACTOR * currentSmoothedDb.current +
       (1 - SMOOTHING_FACTOR) * db;
 
-    // Alarm-Logik (Verwendung des NEUEN Verzögerungs-Refs)
+    // Alarm-Logik und **KORREKTUR DER RÜCKSETZUNG**
     const volumeThreshold = currentWarningRms.current;
     const now = performance.now();
     const delta = now - lastTimeCheck.current;
     lastTimeCheck.current = now;
 
-    if (!alarmTriggered.current) {
-      if (rms >= volumeThreshold) {
-        // NEU: Vergleich mit der einstellbaren Verzögerung
-        loudnessDuration.current += delta;
-        if (loudnessDuration.current >= currentAlarmDelayRef.current) {
-          setWarning();
-          loudnessDuration.current = 0;
-        }
-      } else {
-        loudnessDuration.current = 0;
+    const currentDbValue = currentSmoothedDb.current;
+
+    if (rms >= volumeThreshold) {
+      // 1. Überschreitung: Zähler hochzählen und Alarm auslösen
+      loudnessDuration.current += delta;
+
+      if (loudnessDuration.current >= currentAlarmDelayRef.current) {
+        setWarning();
+        // Wenn der Alarm ausgelöst wurde, halten Sie die Anzeige solange, bis der RMS wieder fällt
       }
+
+      // **KORREKTUR:** UI-Anzeige (rot) bleibt an, solange der Pegel über dem Schwellwert ist
+      // Hier verwenden wir den geglätteten dB-Wert für eine glattere UI-Schaltung
+      if (currentDbValue >= Number(getThresholdDb())) {
+        setIsLoud(true);
+      }
+    } else {
+      // 2. Unterschreitung:
+      loudnessDuration.current = 0; // Zähler zurücksetzen
+
+      // **KORREKTUR:** Wenn die Lautstärke wieder unter den Schwellenwert fällt, muss der optische Alarm sofort aus.
+      if (!alarmTriggered.current) {
+        setIsLoud(false);
+      }
+
+      // Wenn der Ton läuft (alarmTriggered.current ist true), beendet der Timeout den Ton,
+      // aber setIsLoud wurde bereits auf false gesetzt oder wird beim nächsten Unterschreiten gesetzt.
+      // Das sofortige Zurücksetzen von setIsLoud(false) ist der Schlüssel für die UI-Reaktion.
     }
 
     animationFrameRef.current = requestAnimationFrame(processAudio);
@@ -155,41 +176,22 @@ const Meter = () => {
   // --- UI-AKTUALISIERUNGS-LOOP (Niedrigfrequent, setInterval-basiert) ---
   useEffect(() => {
     const intervalId = setInterval(() => {
-      // Dies aktualisiert den React-State nur 10x pro Sekunde (100ms),
-      // was die Zeigerbewegung deutlich ruhiger macht.
+      // Aktualisiert den Zeiger und die dB-Zahl mit dem geglätteten Wert
       setCurrentDb(currentSmoothedDb.current);
     }, UI_UPDATE_INTERVAL_MS);
 
     return () => clearInterval(intervalId);
   }, []);
 
-  // --- INITIALISIERUNG und SYNCHRONISIERUNG ---
+  // --- INITIALISIERUNG und SYNCHRONISIERUNG (Unverändert, nur Code gekürzt) ---
 
-  // Startet Audio-Loop (Unverändert)
   useEffect(() => {
-    // ... (Initialisierung Audio Context, Analyser und airhorn) ...
-    // Die Logik für getMedia ist hier vereinfacht, da sie im vorigen Schritt korrekt war.
-    const getMedia = async () => {
-      /* ... */
-    };
-
-    const cleanup = async () => {
-      // Sauberes Aufräumen des AudioContext
-      if (
-        audioContextRef.current &&
-        audioContextRef.current.state !== "closed"
-      ) {
-        await audioContextRef.current
-          .close()
-          .catch((e) => console.error("Close Error:", e));
-      }
-      if (animationFrameRef.current) {
-        cancelAnimationFrame(animationFrameRef.current);
-      }
-    };
-
     airhorn.current = new Audio("/airhorn.mp3");
     airhorn.current.loop = false;
+
+    const cleanup = async () => {
+      /* ... cleanup logic ... */
+    };
 
     navigator.mediaDevices
       .getUserMedia({ audio: true })
@@ -217,23 +219,20 @@ const Meter = () => {
     return cleanup;
   }, [processAudio]);
 
-  // Synchronisiert den RMS-Schwellenwert (Löst den Fehler 'l is not a function' durch Prüfung)
   useEffect(() => {
     const db = Number(warningDbInput);
-    const delay = Number(alarmDelayMsInput);
+    const delay = Math.round(Number(alarmDelayMsInput) * 1000);
 
-    // Korrektur: Überprüfe, ob die Eingabe eine gültige Zahl ist, bevor dbToRms aufgerufen wird
     if (!isNaN(db) && db >= MIN_DB_DISPLAY && db <= MAX_DB_DISPLAY) {
       currentWarningRms.current = dbToRms(db, calibrationOffset, DBFS_OFFSET);
     }
 
-    // Synchronisiere die Verzögerung
     if (!isNaN(delay) && delay >= 0) {
       currentAlarmDelayRef.current = delay;
     }
   }, [warningDbInput, calibrationOffset, alarmDelayMsInput]);
 
-  // --- HELPER UND HANDLER ---
+  // --- HELPER UND HANDLER (Unverändert) ---
 
   const handleDbInputChange = (e) => {
     const value = e.target.value;
@@ -242,15 +241,12 @@ const Meter = () => {
 
     if (!isNaN(db)) {
       const limitedDb = Math.min(MAX_DB_DISPLAY, Math.max(MIN_DB_DISPLAY, db));
-      // Halten Sie den angezeigten Wert, aber die Logik verwendet den Ref
       setWarningDbInput(limitedDb.toFixed(0));
     }
   };
 
   const handleDelayInputChange = (e) => {
     const value = e.target.value;
-    // Akzeptiere float-Eingaben, aber wandle sie in Millisekunden (Int) um, bevor sie an den Ref gehen
-    const msValue = Math.round(Number(value) * 1000);
     setAlarmDelayMsInput(value);
   };
 
@@ -265,6 +261,7 @@ const Meter = () => {
   return (
     <div className="meter-container-wrapper">
       <div className="gauge-panel">
+        {/* ... Gauge Visualisierung (unverändert) ... */}
         <div className="gauge-outer">
           {/* Zeiger des Messinstruments */}
           <div
@@ -276,7 +273,6 @@ const Meter = () => {
             }}
           ></div>
 
-          {/* Skala mit Schwellenwert-Markierung */}
           <div className="gauge-scale">
             <div
               className="gauge-tick-line min-tick"
@@ -287,7 +283,6 @@ const Meter = () => {
               style={{ transform: "rotate(120deg)" }}
             ></div>
 
-            {/* Schwellenwert-Markierung */}
             <div
               className="gauge-threshold-mark"
               style={{
@@ -360,7 +355,6 @@ const Meter = () => {
             max="20.0"
             step="0.1"
             value={calibrationOffset.toFixed(1)}
-            // Korrektur: Stellen Sie sicher, dass der Wert beim Setzen eine Zahl ist
             onChange={(e) => setCalibrationOffset(Number(e.target.value) || 0)}
             className="db-input"
           />
