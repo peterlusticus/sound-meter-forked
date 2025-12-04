@@ -269,9 +269,11 @@ const Meter = () => {
             background: "#00bfa5",
             minWidth: settings.width + "px",
             flexGrow: 1,
-            height: settings.height + "px",
+            // ANPASSUNG: Höhe des Containers füllen
+            height: "100%", // NEU: Nimmt die volle Höhe des übergeordneten Containers ein
             transformOrigin: "bottom",
             margin: "0 1px",
+            // Stellt sicher, dass die Balken unten ausgerichtet sind
             alignSelf: "flex-end",
             borderRadius: "0",
           }}
@@ -333,10 +335,14 @@ const Meter = () => {
         </p>
       </div>
 
+      {/* Hier wird die Höhe des Visualizers festgelegt */}
       <div
         className="meter-visualizer"
         style={{
           height: settings.height + "px",
+          // WICHTIG: Sicherstellen, dass der Container Flex-Elemente am Ende ausrichtet (falls es nicht schon in styles.css ist)
+          display: "flex",
+          alignItems: "flex-end", // NEU/KORREKT: Stellt sicher, dass die Basis der Balken fixiert ist
         }}
       >
         {isLoud && (
