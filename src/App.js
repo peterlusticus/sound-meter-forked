@@ -227,28 +227,37 @@ const Meter = () => {
   useEffect(() => {
     // Intervall (50ms) zur Aktualisierung der ANZEIGE
     const intervalId = setInterval(() => {
-      // 1. HORIZONTALE VERSCHIEBUNG ENTFERNT
-      // volumeRefs.current.unshift(volume.current);
-      // volumeRefs.current.pop();
+      // 1. Horizontale Verschiebung der Daten
+      volumeRefs.current.unshift(volume.current); // Fügt den NEUESTEN RMS-Wert vorne ein
+      volumeRefs.current.pop(); // Entfernt den ÄLTESTEN Wert hinten
 
       // 2. UI-Update
       setCurrentDb(currentSmoothedDb.current);
 
       const thresholdDb = getThresholdDb();
-      const currentRms = volume.current; // Den aktuellen RMS-Wert einmal abrufen
-      const isLoud = amplitudeToDb(currentRms) >= thresholdDb; // Gesamtfarbe bestimmen
 
+      // NEU: Die Schleife weist jedem Balken den entsprechenden, verschobenen Wert zu
       for (let i = 0; i < refs.current.length; i++) {
         if (refs.current[i]) {
-          // NEU: Alle Balken zeigen den GLEICHEN, aktuellen Wert
+          // barVolume ist der Wert an der Position i im verschobenen Array
+          const barVolume = volumeRefs.current[i];
+
+          // NEU: Berechnung der Farbe und Höhe auf Basis des historischen Wertes
+          const isBarLoud = amplitudeToDb(barVolume) >= thresholdDb;
+
+          // Skalierung des Balkens (Höhe)
           refs.current[i].style.transform = `scaleY(${
-            currentRms / MAX_AMPLITUDE
+            barVolume / MAX_AMPLITUDE
           })`;
 
-          // NEU: Alle Balken haben dieselbe Farbe basierend auf dem Schwellenwert
-          refs.current[i].style.background = isLoud
+          // Färbung des Balkens
+          refs.current[i].style.background = isBarLoud
             ? "rgb(255, 99, 71)"
             : "#00bfa5";
+
+          // ZUSÄTZLICHE GLÄTTUNG (Optional):
+          // Um das Zucken noch weiter zu minimieren, können Sie die SmoothingTimeConstant
+          // des AnalyserNode in der getMedia Funktion erhöhen (z.B. von 0.75 auf 0.85 oder 0.9).
         }
       }
     }, 50);
