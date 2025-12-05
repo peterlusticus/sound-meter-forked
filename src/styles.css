@@ -1,42 +1,46 @@
- /* CSS für die Balkenanzeige */
-    .v-bar-meter-container {
-      width: 50px;
-      height: 250px;
-      background-color: #e5e7eb; /* Gray-200 */
-      border: 1px solid #d1d5db; /* Gray-300 */
-      border-radius: 8px;
-      overflow: hidden;
-      position: relative;
-      margin-bottom: 2rem;
-    }
+/* Diese Datei enthält das benutzerdefinierte CSS für die Darstellung des Dezibel-Balkenmeters.
+Alle Tailwind-Klassen (z.B. bg-gray-50, flex, p-4 etc.) werden als in der Umgebung vorhanden betrachtet.
+*/
 
-    .v-bar-fill {
-      position: absolute;
-      bottom: 0;
-      width: 100%;
-      background-color: #10b981; /* Default Green */
-      transition: height 0.1s ease-linear;
-    }
+/* CSS für die Balkenanzeige */
+.v-bar-meter-container {
+  width: 50px;
+  height: 250px;
+  background-color: #e5e7eb; /* Gray-200 */
+  border: 1px solid #d1d5db; /* Gray-300 */
+  border-radius: 8px;
+  overflow: hidden;
+  position: relative;
+  margin-bottom: 2rem;
+}
 
-    .v-bar-threshold-line {
-      position: absolute;
-      left: 0;
-      width: 100%;
-      height: 2px;
-      background-color: #ef4444; /* Red-500 */
-      z-index: 10;
-    }
+.v-bar-fill {
+  position: absolute;
+  bottom: 0;
+  width: 100%;
+  background-color: #10b981; /* Default Green (bg-green-500) */
+  transition: height 0.1s ease-linear;
+}
 
-    /* Pulsierender Effekt für den Hintergrund */
-    .loud-background-pulse {
-      animation: pulse-red 2s infinite;
-    }
+.v-bar-threshold-line {
+  position: absolute;
+  left: 0;
+  width: 100%;
+  height: 2px;
+  background-color: #ef4444; /* Red-500 */
+  z-index: 10;
+}
 
-    @keyframes pulse-red {
-      0%, 100% {
-        background-color: #fef2f2; /* Red-50 */
-      }
-      50% {
-        background-color: #fee2e2; /* Red-100 */
-      }
-    }
+/* Pulsierender Effekt für den Hintergrund bei Alarm */
+.loud-background-pulse {
+  animation: pulse-red 2s infinite;
+}
+
+@keyframes pulse-red {
+  0%, 100% {
+    background-color: #fef2f2; /* Red-50 */
+  }
+  50% {
+    background-color: #fee2e2; /* Red-100 */
+  }
+}
