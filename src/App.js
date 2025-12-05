@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState, useCallback } from "react";
-import "./style.css"
+import "./style.css";
 // --- KONSTANTEN ---
 const MAX_DB_DISPLAY = 120;
 const MIN_DB_DISPLAY = 0;
