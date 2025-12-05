@@ -1,7 +1,6 @@
 import React, { useEffect, useRef, useState, useCallback } from "react";
-import "./style.css"
 
-// --- KONSTANTEN (Unverändert, Kernlogik) ---
+// --- KONSTANTEN ---
 const MAX_DB_DISPLAY = 120;
 const MIN_DB_DISPLAY = 0;
 const DBFS_OFFSET = MAX_DB_DISPLAY;
@@ -13,7 +12,7 @@ const ALARM_DURATION_MS = 2000;
 const INITIAL_WARNING_DB = 75;
 const UI_UPDATE_INTERVAL_MS = 100;
 
-// --- HILFSFUNKTIONEN (Unverändert) ---
+// --- HILFSFUNKTIONEN ---
 
 // Berechnet den Dezibel-Wert (dB SPL) aus dem RMS-Wert
 const calculateDb = (rms, calibrationOffset, dbfsOffset) => {
@@ -27,7 +26,6 @@ const calculateDb = (rms, calibrationOffset, dbfsOffset) => {
 const dbToRms = (db, calibrationOffset, dbfsOffset) => {
   const dbfs = db - dbfsOffset - calibrationOffset;
   let rms = Math.pow(10, dbfs / 20);
-  // Stellt sicher, dass der RMS-Wert im gültigen Bereich (0.000001 bis 1.0) liegt
   return Math.min(1.0, Math.max(0.000001, rms));
 };
 
@@ -63,20 +61,14 @@ const SoundLevelMeter = () => {
   const currentAlarmDelayRef = useRef(INITIAL_ALARM_DELAY_MS);
 
   // Alarm-Audio
-  // Da die Datei 'airhorn.mp3' nicht bereitgestellt wird, kommentieren wir das Audio aus.
-  // const airhorn = useRef(null);
   const alarmTriggered = useRef(false); // Ist der Alarm-Ton gerade aktiv
   const alarmTimeoutRef = useRef(null);
 
   // --- ALARM-LOGIK ---
 
   const resetAlarm = useCallback(() => {
-    // Stoppt den optischen Alarm und den Ton
+    // Stoppt den optischen Alarm
     setIsLoud(false);
-    /* if (airhorn.current) {
-      airhorn.current.pause();
-      airhorn.current.currentTime = 0;
-    } */
     alarmTriggered.current = false;
     if (alarmTimeoutRef.current) {
       clearTimeout(alarmTimeoutRef.current);
@@ -91,19 +83,8 @@ const SoundLevelMeter = () => {
     setIsLoud(true);
     alarmTriggered.current = true;
 
-    /* if (airhorn.current) {
-      airhorn.current.currentTime = 0;
-      airhorn.current
-        .play()
-        .catch((e) => console.error("Fehler beim Abspielen des Tons:", e));
-    } */
-
     // Setze den Timeout, um den Alarm nach ALARM_DURATION_MS zurückzusetzen
     alarmTimeoutRef.current = setTimeout(() => {
-      /* if (airhorn.current) {
-        airhorn.current.pause();
-        airhorn.current.currentTime = 0;
-      } */
       alarmTriggered.current = false; // Ton ist beendet
       // Die optische Anzeige wird durch den processAudio Loop (else block) gesteuert
     }, ALARM_DURATION_MS);
@@ -185,7 +166,6 @@ const SoundLevelMeter = () => {
       if (audioContextRef.current && audioContextRef.current.state !== 'closed') {
         try {
           // Stoppt alle Audioquellen, bevor der Context geschlossen wird
-          // Dies ist für einen sauberen Abbau des Streams wichtig.
           const stream = audioContextRef.current.getSources().find(source => source.mediaStream);
           if (stream) {
               stream.mediaStream.getTracks().forEach(track => track.stop());
@@ -214,7 +194,6 @@ const SoundLevelMeter = () => {
         audioDataArrayRef.current = new Float32Array(RMS_WINDOW_SIZE);
 
         microphone.connect(analyser);
-        // analyser.connect(audioContext.destination); // Standardmäßig auskommentiert, um Echos zu vermeiden
 
         // Starte den Audio-Verarbeitungs-Loop
         processAudio();
@@ -294,8 +273,8 @@ const SoundLevelMeter = () => {
   // --- RENDERING ---
 
   return (
+    // 'loud-background-pulse' ist in styles.css definiert
     <div className={`p-4 sm:p-8 bg-gray-50 min-h-screen flex flex-col items-center justify-center font-sans ${isLoud ? 'loud-background-pulse' : ''}`}>
-      {styles} {/* Fügt die notwendigen CSS-Stile hinzu */}
       <div className="max-w-4xl w-full flex flex-col lg:flex-row gap-8">
         
         {/* Haupt-Anzeige: Balken und dB-Wert */}
@@ -310,7 +289,7 @@ const SoundLevelMeter = () => {
               </div>
           )}
 
-          {/* Der neue Balken-Meter (Wiederhergestellt) */}
+          {/* Der vertikale Balken-Meter. 'v-bar-meter-container', 'v-bar-threshold-line', und 'v-bar-fill' sind in styles.css definiert. */}
           <div className="v-bar-meter-container">
             {/* Schwellenwert-Linie */}
             <div 
@@ -327,6 +306,12 @@ const SoundLevelMeter = () => {
               style={{ height: `${barHeight}%` }}
             ></div>
             
+            {/* Skalen-Markierungen */}
+            <div className="absolute top-0 w-full h-full pointer-events-none text-gray-400">
+                <div className="absolute top-0 right-1/2 translate-x-1/2 -mt-2">120 dB</div>
+                <div className="absolute bottom-0 right-1/2 translate-x-1/2 -mb-2">0 dB</div>
+                <div className="absolute top-1/2 right-full pr-2 -translate-y-1/2">60 dB</div>
+            </div>
           </div>
           
           {/* Aktueller dB-Wert */}
@@ -416,4 +401,4 @@ const SoundLevelMeter = () => {
 };
 
 // Exportieren Sie die Hauptkomponente als Standard-Export
-export default () => <SoundLevelMeter />;
+export default SoundLevelMeter;
