@@ -1,55 +1,5 @@
 import React, { useEffect, useRef, useState, useCallback } from "react";
-
-// Fügen Sie Tailwind-Klassen und benutzerdefinierte Stile für die Anzeige hinzu.
-const styles = (
-  <style>
-    {`
-    /* CSS für die Balkenanzeige */
-    .v-bar-meter-container {
-      width: 50px;
-      height: 250px;
-      background-color: #e5e7eb; /* Gray-200 */
-      border: 1px solid #d1d5db; /* Gray-300 */
-      border-radius: 8px;
-      overflow: hidden;
-      position: relative;
-      margin-bottom: 2rem;
-    }
-
-    .v-bar-fill {
-      position: absolute;
-      bottom: 0;
-      width: 100%;
-      background-color: #10b981; /* Default Green */
-      transition: height 0.1s ease-linear;
-    }
-
-    .v-bar-threshold-line {
-      position: absolute;
-      left: 0;
-      width: 100%;
-      height: 2px;
-      background-color: #ef4444; /* Red-500 */
-      z-index: 10;
-    }
-
-    /* Pulsierender Effekt für den Hintergrund */
-    .loud-background-pulse {
-      animation: pulse-red 2s infinite;
-    }
-
-    @keyframes pulse-red {
-      0%, 100% {
-        background-color: #fef2f2; /* Red-50 */
-      }
-      50% {
-        background-color: #fee2e2; /* Red-100 */
-      }
-    }
-    `}
-  </style>
-);
-
+import "./style.css"
 
 // --- KONSTANTEN (Unverändert, Kernlogik) ---
 const MAX_DB_DISPLAY = 120;
