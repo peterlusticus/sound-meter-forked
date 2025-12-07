@@ -4,14 +4,12 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Schallpegel-Monitor (dB)</title>
-    <!-- Tailwind CSS CDN für das Basis-Layout (Da es in der Umgebung Standard ist, verwenden wir es für grundlegende Utility-Klassen, vermeiden aber die spezifischen Klassen, die du in deinem JSX verwendet hast, und ersetzen die kritische Ästhetik durch custom CSS) -->
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@100..900&display=swap" rel="stylesheet">
     
     <style>
-        /* CSS-Code ersetzt das Styling, das normalerweise Tailwind übernehmen würde, und implementiert die spezifische Ästhetik. */
         :root {
             --color-primary: #3b82f6; /* blue-500 */
             --color-danger: #ef4444; /* red-500 */
@@ -79,7 +77,6 @@
         }
         
         .main-display {
-            /* Styling für den Haupt-Container */
             background-color: white;
             padding: 1.5rem;
             border-radius: 1rem;
@@ -92,7 +89,6 @@
             border-color: var(--color-danger);
         }
         
-        /* Responsive Anpassungen */
         @media (min-width: 1024px) {
             .main-content-wrapper {
                 flex-direction: row;
@@ -103,6 +99,10 @@
     </style>
 </head>
 <body>
+
+    <!-- NEU: Das Audio Element für den Alarm -->
+    <!-- Stellen Sie sicher, dass die Datei unter 'public/airhorn.mp3' erreichbar ist -->
+    <audio id="alarm-sound" src="./airhorn.mp3" preload="auto"></audio>
 
     <div id="app-container" class="w-full flex flex-col items-center justify-center">
         <div id="main-content-wrapper" class="max-w-4xl w-full flex flex-col lg:flex-row gap-8">
@@ -131,7 +131,6 @@
                     
                     <!-- Skalen-Markierungen -->
                     <div class="absolute top-0 w-full h-full pointer-events-none text-gray-400 font-medium text-xs">
-                         <!-- Markierungen auf der linken Seite -->
                          <div class="absolute top-[0%] left-full pl-2 -mt-2">120</div>
                          <div class="absolute top-[25%] left-full pl-2 -translate-y-1/2">90</div>
                          <div class="absolute top-[50%] left-full pl-2 -translate-y-1/2">60</div>
@@ -267,6 +266,8 @@
         const $mainDisplay = document.getElementById('main-display');
         const $appContainer = document.getElementById('app-container');
         const $startButton = document.getElementById('start-button');
+        // NEU: Audio Element Referenz
+        const $alarmSound = document.getElementById('alarm-sound');
 
         // Input Felder
         const $thresholdInput = document.getElementById('threshold-db-input');
@@ -277,11 +278,6 @@
 
         // --- HILFSFUNKTIONEN ---
 
-        /**
-         * Berechnet den Dezibel-Wert (dB SPL) aus dem RMS-Wert.
-         * @param {number} rms - Root Mean Square des Audiosignals (0.0 bis 1.0).
-         * @returns {number} Der berechnete dB SPL Wert.
-         */
         function calculateDb(rms) {
             if (rms <= 0) return MIN_DB_DISPLAY + calibrationOffset;
             const dbfs = 20 * Math.log10(rms);
@@ -289,22 +285,12 @@
             return Math.min(MAX_DB_DISPLAY, Math.max(MIN_DB_DISPLAY, dbSPL));
         }
 
-        /**
-         * Konvertiert den dB-Wert zurück in den RMS-Wert (für den Schwellenwert).
-         * @param {number} db - Der dB SPL Schwellenwert.
-         * @returns {number} Der RMS-Schwellenwert.
-         */
         function dbToRms(db) {
             const dbfs = db - DBFS_OFFSET - calibrationOffset;
             let rms = Math.pow(10, dbfs / 20);
             return Math.min(1.0, Math.max(0.000001, rms));
         }
         
-        /**
-         * Berechnet die Füllhöhe der Balkenanzeige (0% bis 100%)
-         * @param {number} dbValue - Der dB-Wert.
-         * @returns {number} Prozentsatz (0 bis 100).
-         */
         function getBarFillPercentage(dbValue) {
             const min = MIN_DB_DISPLAY;
             const max = MAX_DB_DISPLAY;
@@ -320,11 +306,18 @@
                 alarmTimeoutId = null;
             }
             alarmTriggered = false;
+            
             // UI Cleanup
             $alarmMessage.classList.add('hidden');
             $appContainer.classList.remove('loud-background-pulse');
             $mainDisplay.classList.remove('is-loud');
             $dbDisplay.classList.remove('text-red-600', 'animate-pulse');
+
+            // NEU: Sound stoppen und zurücksetzen
+            if($alarmSound) {
+                $alarmSound.pause();
+                $alarmSound.currentTime = 0;
+            }
         }
 
         function setWarning() {
@@ -337,6 +330,14 @@
             $appContainer.classList.add('loud-background-pulse');
             $mainDisplay.classList.add('is-loud');
             $dbDisplay.classList.add('text-red-600', 'animate-pulse');
+
+            // NEU: Sound abspielen
+            if ($alarmSound) {
+                $alarmSound.currentTime = 0; // Zurück zum Anfang, falls er schon lief
+                $alarmSound.play().catch(e => {
+                    console.warn("Autoplay blockiert oder Datei nicht gefunden:", e);
+                });
+            }
 
             // Timeout, um den visuellen Alarm nach ALARM_DURATION_MS zurückzusetzen
             alarmTimeoutId = setTimeout(() => {
@@ -379,9 +380,9 @@
                 }
             } else {
                 loudnessDuration = 0; 
-                if (!alarmTriggered) {
-                    resetAlarm(); 
-                }
+                // Hinweis: Wir resetten den Alarm hier nicht sofort, damit er 
+                // für die Dauer von ALARM_DURATION_MS sichtbar/hörbar bleibt.
+                // Reset passiert via resetAlarm() timeout oder manuellem Reset.
             }
 
             animationFrameId = requestAnimationFrame(processAudio);
